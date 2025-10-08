@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 CONFIG_FILE="$HOME/.slog.json"
+SLOG_VERSION="1.0.0"
 
 function ensure_dependencies_installed() {
   MISSING=0
@@ -18,47 +19,6 @@ function ensure_dependencies_installed() {
   fi
 }
 
-function ensure_config_v1() {
-  if [ ! -f "$CONFIG_FILE" ]; then
-    return
-  fi
-  CURRENT_VERSION=$(jq -r '.version // empty' "$CONFIG_FILE")
-  if [ "$CURRENT_VERSION" = "1.0.0" ]; then
-    return
-  fi
-  echo "Migrating config to version 1.0.0..."
-  tmp_file="$CONFIG_FILE.tmp"
-  jq '
-    def devices_udid_only: (.devices // {} | to_entries | map({key: .key, value: {udid: .value.udid}}) | from_entries);
-    def coords_per_device: (.devices // {} | to_entries
-      | map(select(.value.coordinates != null) | {(.key): .value.coordinates})
-      | add // {});
-    def orientation_default: {"default": null};
-    . as $old |
-    {
-      version: "1.0.0",
-      devices: devices_udid_only,
-      accounts: ($old.accounts // {}),
-      apps: {
-        "DefaultApp": {
-          bundleId: null,
-          coordinates:
-            (
-              coords_per_device
-              | if (keys | length) > 0 then . else ({"default": ($old.devices[$old.activeDevice].coordinates // {})}) end
-            ),
-          orientation: orientation_default,
-          timing: { postLaunchDelayMs: 1200 },
-          activeAccount: null
-        }
-      },
-      activeDevice: ($old.activeDevice // ((.devices // {} | keys)[0] // "")),
-      activeApp: "DefaultApp",
-      activeAccount: ($old.activeAccount // (($old.accounts // {} | keys)[0] // ""))
-    }
-  ' "$CONFIG_FILE" > "$tmp_file" && mv "$tmp_file" "$CONFIG_FILE"
-  echo "Migration complete."
-}
 
 function setup() {
   ensure_dependencies_installed
@@ -116,7 +76,7 @@ function setup() {
 
   cat > "$CONFIG_FILE" <<EOF
 {
-  "version": "1.0.0",
+  "version": "$SLOG_VERSION",
   "devices": {
     "$DEVICE_NAME": { "udid": "$UDID" }
   },
@@ -152,7 +112,6 @@ EOF
 
 function login() {
   ensure_dependencies_installed
-  ensure_config_v1
 
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
@@ -239,7 +198,6 @@ OSA
 
 function add-device() {
   ensure_dependencies_installed
-  ensure_config_v1
 
   echo "Fetching available simulators (booted only)..."
   SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
@@ -336,7 +294,6 @@ function add-account() {
 
 function add-app() {
   ensure_dependencies_installed
-  ensure_config_v1
   APP=$1
   if [ -z "$APP" ]; then
     echo "Enter app name:"
@@ -418,7 +375,6 @@ function add-app() {
 
 function set-orientation() {
   ensure_dependencies_installed
-  ensure_config_v1
   APP=$1
   DEVICE_NAME=$2
   if [ -z "$APP" ]; then
@@ -444,7 +400,6 @@ function set-orientation() {
 
 function add-coordinates() {
   ensure_dependencies_installed
-  ensure_config_v1
   APP=$1
   DEVICE_NAME=$2
   if [ -z "$APP" ]; then
@@ -468,7 +423,6 @@ function add-coordinates() {
 
 function set-app-account() {
   ensure_dependencies_installed
-  ensure_config_v1
   APP=$1
   ACCOUNT=$2
   if [ -z "$APP" ] || [ -z "$ACCOUNT" ]; then
@@ -492,7 +446,6 @@ function switch-app() {
     echo "No config found. Run '$0 setup' first."
     exit 1
   fi
-  ensure_config_v1
   if [ -z "$1" ]; then
     APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
     if [ -z "$APPS" ]; then
@@ -571,7 +524,6 @@ function switch-device() {
 
 function switch-all() {
   ensure_dependencies_installed
-  ensure_config_v1
 
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
