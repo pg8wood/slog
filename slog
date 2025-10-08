@@ -129,16 +129,18 @@ function setup() {
 
   printf "%b\n" "${C_BOLD}Select default orientation for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
   printf "  1) Portrait %b(default)%b\n" "${C_DIM}" "${C_RESET}"
-  printf "  2) Landscape\n"
-  read -p "Choose [1-2]: " OR_CHOICE
+  printf "  2) Landscape Left\n"
+  printf "  3) Landscape Right\n"
+  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
   case "$OR_CHOICE" in
-    2) ORI="Landscape" ;;
+    2) ORI="Landscape Left" ;;
+    3) ORI="Landscape Right" ;;
     *) ORI="Portrait" ;;
   esac
 
-  printf "%b" "Extra wait after launch (ms) ${C_DIM}[default: 500]${C_RESET}: "
+  printf "%b" "Extra wait after launch (ms) ${C_DIM}[default: 1000]${C_RESET}: "
   read WAIT_MS
-  if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=1000; fi
 
   printf "%b\n" "${C_BOLD}Enter default coordinates for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
   prompt_xy "email" "field" "100 300"
@@ -330,11 +332,13 @@ function add-device() {
             APP_NAME="$CHOICE"
             printf "%b\n" "Selected app: ${C_CYAN}$APP_NAME${C_RESET}"
             echo "Select orientation for $APP_NAME ($NAME):"
-            echo "  1) Portrait"
-            echo "  2) Landscape"
-            read -p "Choose [1-2]: " OR_CHOICE2
+            echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
+            echo "  2) Landscape Left"
+            echo "  3) Landscape Right"
+            read -p "Choose [1-3] (Enter for default): " OR_CHOICE2
             case "$OR_CHOICE2" in
-              2) ORI2="Landscape" ;;
+              2) ORI2="Landscape Left" ;;
+              3) ORI2="Landscape Right" ;;
               *) ORI2="Portrait" ;;
             esac
             prompt_xy "email" "field ($APP_NAME / $NAME)" "100 300"
@@ -391,16 +395,18 @@ function add-app() {
   echo "Enter bundle ID for $APP (e.g., com.example.App):"
   read BUNDLE_ID
   echo "Select default orientation for $APP:"
-  echo "  1) Portrait"
-  echo "  2) Landscape"
-  read -p "Choose [1-2]: " OR_CHOICE
+  echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
+  echo "  2) Landscape Left"
+  echo "  3) Landscape Right"
+  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
   case "$OR_CHOICE" in
-    2) ORI="Landscape" ;;
+    2) ORI="Landscape Left" ;;
+    3) ORI="Landscape Right" ;;
     *) ORI="Portrait" ;;
   esac
-  echo "Extra wait after launch (ms, Enter for 500):"
+  echo "Extra wait after launch (ms, Enter for 1000):"
   read WAIT_MS
-  if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=1000; fi
   prompt_xy "email" "field (default coordinates)" "100 300"
   EX="$X_OUT"; EY="$Y_OUT"
   prompt_xy "password" "field" "200 400"
@@ -434,11 +440,13 @@ function add-app() {
             DEVICE_NAME="$CHOICE"
             echo "Selected: $DEVICE_NAME"
             echo "Select orientation for $APP ($DEVICE_NAME):"
-            echo "  1) Portrait"
-            echo "  2) Landscape"
-            read -p "Choose [1-2]: " OR_CHOICE2
+            echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
+            echo "  2) Landscape Left"
+            echo "  3) Landscape Right"
+            read -p "Choose [1-3] (Enter for default): " OR_CHOICE2
             case "$OR_CHOICE2" in
-              2) ORI2="Landscape" ;;
+              2) ORI2="Landscape Left" ;;
+              3) ORI2="Landscape Right" ;;
               *) ORI2="Portrait" ;;
             esac
             prompt_xy "email" "field ($APP / $DEVICE_NAME)" "100 300"
@@ -472,11 +480,13 @@ function set-orientation() {
   fi
   KEY=${DEVICE_NAME:-default}
   echo "Select orientation for $APP ($KEY):"
-  echo "  1) Portrait"
-  echo "  2) Landscape"
-  read -p "Choose [1-2]: " OR_CHOICE
+  echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
+  echo "  2) Landscape Left"
+  echo "  3) Landscape Right"
+  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
   case "$OR_CHOICE" in
-    2) ORI="Landscape" ;;
+    2) ORI="Landscape Left" ;;
+    3) ORI="Landscape Right" ;;
     *) ORI="Portrait" ;;
   esac
   jq ".apps[\"$APP\"].orientation[\"$KEY\"] = \"$ORI\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
