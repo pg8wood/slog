@@ -127,16 +127,8 @@ function setup() {
   printf "%b" "Enter bundle ID for ${C_CYAN}$APP_NAME${C_RESET} (e.g., com.patrickgatewood.slog): "
   read BUNDLE_ID
 
-  printf "%b\n" "${C_BOLD}Select default orientation for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
-  printf "  1) Portrait %b(default)%b\n" "${C_DIM}" "${C_RESET}"
-  printf "  2) Landscape Left\n"
-  printf "  3) Landscape Right\n"
-  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
-  case "$OR_CHOICE" in
-    2) ORI="Landscape Left" ;;
-    3) ORI="Landscape Right" ;;
-    *) ORI="Portrait" ;;
-  esac
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
 
   printf "%b" "Extra wait after launch (ms) ${C_DIM}[default: 1000]${C_RESET}: "
   read WAIT_MS
@@ -245,8 +237,12 @@ function login() {
     LAUNCH_OUT=$(xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>/dev/null || true)
   fi
 
-  if [ -n "$ORIENTATION" ]; then
-    printf "%b\n" "Setting orientation: ${C_CYAN}$ORIENTATION${C_RESET}"
+  # Force Portrait due to AXe rotation bug (https://github.com/cameroncooke/AXe/issues/5)
+  if [ -n "$ORIENTATION" ] && [ "$ORIENTATION" != "Portrait" ]; then
+    printf "%b\n" "${C_YELLOW}Warning:${C_RESET} Orientation '$ORIENTATION' will be ignored; forcing Portrait."
+  fi
+  if true; then
+    printf "%b\n" "Setting orientation: ${C_CYAN}Portrait${C_RESET}"
     # Note: You may be prompted to grant Terminal automation permissions the first time
     osascript <<OSA || true
 tell application "Simulator" to activate
@@ -256,7 +252,7 @@ tell application "System Events"
       click (first menu item whose name starts with "$ACTIVE_DEVICE") of menu "Window" of menu bar 1
     end try
     try
-      click menu item "$ORIENTATION" of menu "Orientation" of menu item "Orientation" of menu "Device" of menu bar 1
+      click menu item "Portrait" of menu "Orientation" of menu item "Orientation" of menu "Device" of menu bar 1
     end try
   end tell
 end tell
@@ -331,16 +327,8 @@ function add-device() {
             fi
             APP_NAME="$CHOICE"
             printf "%b\n" "Selected app: ${C_CYAN}$APP_NAME${C_RESET}"
-            echo "Select orientation for $APP_NAME ($NAME):"
-            echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
-            echo "  2) Landscape Left"
-            echo "  3) Landscape Right"
-            read -p "Choose [1-3] (Enter for default): " OR_CHOICE2
-            case "$OR_CHOICE2" in
-              2) ORI2="Landscape Left" ;;
-              3) ORI2="Landscape Right" ;;
-              *) ORI2="Portrait" ;;
-            esac
+            printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+            ORI2="Portrait"
             prompt_xy "email" "field ($APP_NAME / $NAME)" "100 300"
             EX2="$X_OUT"; EY2="$Y_OUT"
             prompt_xy "password" "field ($APP_NAME / $NAME)" "200 400"
@@ -394,16 +382,8 @@ function add-app() {
   fi
   echo "Enter bundle ID for $APP (e.g., com.example.App):"
   read BUNDLE_ID
-  echo "Select default orientation for $APP:"
-  echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
-  echo "  2) Landscape Left"
-  echo "  3) Landscape Right"
-  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
-  case "$OR_CHOICE" in
-    2) ORI="Landscape Left" ;;
-    3) ORI="Landscape Right" ;;
-    *) ORI="Portrait" ;;
-  esac
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
   echo "Extra wait after launch (ms, Enter for 1000):"
   read WAIT_MS
   if [ -z "$WAIT_MS" ]; then WAIT_MS=1000; fi
@@ -439,16 +419,8 @@ function add-app() {
             fi
             DEVICE_NAME="$CHOICE"
             echo "Selected: $DEVICE_NAME"
-            echo "Select orientation for $APP ($DEVICE_NAME):"
-            echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
-            echo "  2) Landscape Left"
-            echo "  3) Landscape Right"
-            read -p "Choose [1-3] (Enter for default): " OR_CHOICE2
-            case "$OR_CHOICE2" in
-              2) ORI2="Landscape Left" ;;
-              3) ORI2="Landscape Right" ;;
-              *) ORI2="Portrait" ;;
-            esac
+            printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+            ORI2="Portrait"
             prompt_xy "email" "field ($APP / $DEVICE_NAME)" "100 300"
             EX2="$X_OUT"; EY2="$Y_OUT"
             prompt_xy "password" "field ($APP / $DEVICE_NAME)" "200 400"
@@ -479,16 +451,8 @@ function set-orientation() {
     exit 1
   fi
   KEY=${DEVICE_NAME:-default}
-  echo "Select orientation for $APP ($KEY):"
-  echo "  1) Portrait ${C_DIM}(default)${C_RESET}"
-  echo "  2) Landscape Left"
-  echo "  3) Landscape Right"
-  read -p "Choose [1-3] (Enter for default): " OR_CHOICE
-  case "$OR_CHOICE" in
-    2) ORI="Landscape Left" ;;
-    3) ORI="Landscape Right" ;;
-    *) ORI="Portrait" ;;
-  esac
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
   jq ".apps[\"$APP\"].orientation[\"$KEY\"] = \"$ORI\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Set orientation for $APP ($KEY) to $ORI"
 }
