@@ -525,8 +525,133 @@ function switch-device() {
     NAME="$1"
   fi
 
+  # Ensure the selected device exists and get its UDID
+  UDID=$(jq -r ".devices[\"$NAME\"].udid // empty" "$CONFIG_FILE")
+  if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+    echo "Device '$NAME' not found in config."
+    exit 1
+  fi
+
+  # Attempt to boot (safe if already booted)
+  xcrun simctl boot "$UDID" >/dev/null 2>&1 || true
+  # Wait for boot completion if bootstatus is available; fallback to polling
+  if xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1; then
+    : # bootstatus handled the wait
+  else
+    # Fallback polling up to ~30s
+    for i in $(seq 1 30); do
+      STATE=$(xcrun simctl list devices | grep "$UDID" | sed -n 's/.*(\(Booted\|Shutdown\|Booting\|Shutting Down\)).*/\1/p' | tail -n1)
+      if [ "$STATE" = "Booted" ]; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+
   jq ".activeDevice = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-  echo "Switched active device to $NAME"
+  echo "Switched active device to $NAME (booted)"
+}
+
+function switch-all() {
+  ensure_dependencies_installed
+  ensure_config_v1
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  ACTIVE_APP=$(jq -r '.activeApp' "$CONFIG_FILE")
+  ACTIVE_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+
+  # Choose device
+  DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+  if [ -z "$DEVICES" ]; then
+    echo "No devices found in config. Use 'add-device' first."
+    exit 1
+  fi
+  echo "Select device (Enter for current: $ACTIVE_DEVICE):"
+  IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+  for i in "${!DEV_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${DEV_ARRAY[$i]}" = "$ACTIVE_DEVICE" ]; then
+      echo "  $idx) ${DEV_ARRAY[$i]} [current]"
+    else
+      echo "  $idx) ${DEV_ARRAY[$i]}"
+    fi
+  done
+  read -p "Device number: " DEV_SEL
+  if [ -z "$DEV_SEL" ]; then
+    CHOSEN_DEVICE="$ACTIVE_DEVICE"
+  else
+    if ! [[ "$DEV_SEL" =~ ^[0-9]+$ ]] || [ "$DEV_SEL" -lt 1 ] || [ "$DEV_SEL" -gt ${#DEV_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_DEVICE="${DEV_ARRAY[$((DEV_SEL-1))]}"
+  fi
+
+  # Choose app
+  APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+  if [ -z "$APPS" ]; then
+    echo "No apps found in config. Use 'add-app' first."
+    exit 1
+  fi
+  echo "Select app (Enter for current: $ACTIVE_APP):"
+  IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+  for i in "${!APP_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${APP_ARRAY[$i]}" = "$ACTIVE_APP" ]; then
+      echo "  $idx) ${APP_ARRAY[$i]} [current]"
+    else
+      echo "  $idx) ${APP_ARRAY[$i]}"
+    fi
+  done
+  read -p "App number: " APP_SEL
+  if [ -z "$APP_SEL" ]; then
+    CHOSEN_APP="$ACTIVE_APP"
+  else
+    if ! [[ "$APP_SEL" =~ ^[0-9]+$ ]] || [ "$APP_SEL" -lt 1 ] || [ "$APP_SEL" -gt ${#APP_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_APP="${APP_ARRAY[$((APP_SEL-1))]}"
+  fi
+
+  # Choose account
+  ACCOUNTS=$(jq -r '.accounts | keys[]?' "$CONFIG_FILE")
+  if [ -z "$ACCOUNTS" ]; then
+    echo "No accounts found in config. Use 'add-account' first."
+    exit 1
+  fi
+  echo "Select account (Enter for current: $ACTIVE_ACCOUNT):"
+  IFS=$'\n' read -rd '' -a ACC_ARRAY <<<"$ACCOUNTS"
+  for i in "${!ACC_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${ACC_ARRAY[$i]}" = "$ACTIVE_ACCOUNT" ]; then
+      echo "  $idx) ${ACC_ARRAY[$i]} [current]"
+    else
+      echo "  $idx) ${ACC_ARRAY[$i]}"
+    fi
+  done
+  read -p "Account number: " ACC_SEL
+  if [ -z "$ACC_SEL" ]; then
+    CHOSEN_ACCOUNT="$ACTIVE_ACCOUNT"
+  else
+    if ! [[ "$ACC_SEL" =~ ^[0-9]+$ ]] || [ "$ACC_SEL" -lt 1 ] || [ "$ACC_SEL" -gt ${#ACC_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_ACCOUNT="${ACC_ARRAY[$((ACC_SEL-1))]}"
+  fi
+
+  # Apply selections using existing commands (booting and foregrounding via switch-device)
+  "$0" switch-device "$CHOSEN_DEVICE"
+  "$0" switch-app "$CHOSEN_APP"
+  "$0" switch-account "$CHOSEN_ACCOUNT"
+
+  echo "Switched to device='$CHOSEN_DEVICE', app='$CHOSEN_APP', account='$CHOSEN_ACCOUNT'"
 }
 
 function switch-account() {
@@ -588,6 +713,8 @@ Commands:
                     Switch active app (interactive if NAME omitted)
   switch account [NAME]
                     Switch active account (interactive if NAME omitted)
+  switch
+                     Interactive: pick device, app, account
 
 Options:
   -h, -H, --help    Show this help and exit
@@ -620,6 +747,7 @@ case "$1" in
   switch)
     shift
     case "$1" in
+      "" ) switch-all ;;
       device)
         shift; switch-device "$@" ;;
       app)
@@ -628,6 +756,7 @@ case "$1" in
         shift; switch-account "$@" ;;
       *)
         echo "Usage: $0 switch {device|app|account} [NAME]"
+        echo "       $0 switch  # interactive: pick device, app, account"
         exit 1 ;;
     esac
     ;;
