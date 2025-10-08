@@ -355,23 +355,26 @@ function add-device() {
 }
 
 function add-account() {
-  NAME=$1
-  if [ -z "$NAME" ]; then
-    echo "Usage: $0 add-account \"AccountName\""
-    exit 1
+  init_colors
+  NAME_ARG=$1
+  printf "%b" "Enter username: "
+  read USER
+  printf "%b" "Enter password: "
+  read -s PASS
+  echo
+  NICKNAME="$NAME_ARG"
+  if [ -z "$NICKNAME" ]; then
+    printf "%b" "Enter nickname for this account ${C_DIM}[default: $USER]${C_RESET}: "
+    read NICKNAME
+    if [ -z "$NICKNAME" ]; then NICKNAME="$USER"; fi
   fi
 
-  echo "Enter username:"
-  read USER
-  echo "Enter password:"
-  read -s PASS
-
-  jq ".accounts[\"$NAME\"] = {
+  jq ".accounts[\"$NICKNAME\"] = {
     \"username\": \"$USER\",
     \"password\": \"$PASS\"
   }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-  echo "Added account $NAME"
+  printf "%b\n" "${C_GREEN}Added account${C_RESET} $NICKNAME"
 }
 
 function add-app() {
