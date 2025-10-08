@@ -40,6 +40,7 @@ function ensure_config_v1() {
       accounts: ($old.accounts // {}),
       apps: {
         "DefaultApp": {
+          bundleId: null,
           coordinates:
             (
               coords_per_device
@@ -82,6 +83,9 @@ function setup() {
   echo "Enter an app name to configure (e.g., ReceiveStock):"
   read APP_NAME
 
+  echo "Enter bundle ID for $APP_NAME (e.g., com.example.ReceiveStock):"
+  read BUNDLE_ID
+
   echo "Enter X Y for email field (default coordinates for $APP_NAME):"
   read EX EY
   echo "Enter X Y for password field:"
@@ -102,6 +106,7 @@ function setup() {
   },
   "apps": {
     "$APP_NAME": {
+      "bundleId": "$BUNDLE_ID",
       "coordinates": {
         "default": {
           "email": { "x": $EX, "y": $EY },
@@ -140,6 +145,7 @@ function login() {
   APP_ACCOUNT=$(jq -r ".apps[\"$ACTIVE_APP\"].activeAccount // empty" "$CONFIG_FILE")
   GLOBAL_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
   ACTIVE_ACCOUNT=${APP_ACCOUNT:-$GLOBAL_ACCOUNT}
+  BUNDLE_ID=$(jq -r ".apps[\"$ACTIVE_APP\"].bundleId // empty" "$CONFIG_FILE")
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
   EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
@@ -168,6 +174,11 @@ function login() {
     echo "Error: Simulator $UDID is not booted (state: $DEVICE_STATE)."
     echo "Please boot the simulator manually, then rerun."
     exit 1
+  fi
+
+  if [ -n "$BUNDLE_ID" ]; then
+    echo "Launching app: $BUNDLE_ID"
+    xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
   fi
 
   axe tap -x $EMAIL_X -y $EMAIL_Y --udid "$UDID"
@@ -243,13 +254,15 @@ function add-app() {
     echo "App $APP already exists."
     exit 1
   fi
+  echo "Enter bundle ID for $APP (e.g., com.example.App):"
+  read BUNDLE_ID
   echo "Enter X Y for email field (default coordinates):"
   read EX EY
   echo "Enter X Y for password field:"
   read PX PY
   echo "Enter X Y for login button:"
   read LX LY
-  jq ".apps[\"$APP\"] = { \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Added app $APP"
 }
 
