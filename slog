@@ -48,6 +48,7 @@ function ensure_config_v1() {
               | if (keys | length) > 0 then . else ({"default": ($old.devices[$old.activeDevice].coordinates // {})}) end
             ),
           orientation: orientation_default,
+          timing: { postLaunchDelayMs: 1200 },
           activeAccount: null
         }
       },
@@ -97,6 +98,10 @@ function setup() {
     *) ORI="Portrait" ;;
   esac
 
+  echo "Extra wait after launch (ms, Enter for 1200):"
+  read WAIT_MS
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=1200; fi
+
   echo "Enter X Y for email field (default coordinates for $APP_NAME):"
   read EX EY
   echo "Enter X Y for password field:"
@@ -126,6 +131,8 @@ function setup() {
         }
       },
       "orientation": { "default": "$ORI" }
+      ,
+      "timing": { "postLaunchDelayMs": $WAIT_MS }
     }
   },
   "accounts": {
@@ -159,6 +166,7 @@ function login() {
   ACTIVE_ACCOUNT=${APP_ACCOUNT:-$GLOBAL_ACCOUNT}
   BUNDLE_ID=$(jq -r ".apps[\"$ACTIVE_APP\"].bundleId // empty" "$CONFIG_FILE")
   ORIENTATION=$(jq -r ".apps[\"$ACTIVE_APP\"].orientation[\"$ACTIVE_DEVICE\"] // .apps[\"$ACTIVE_APP\"].orientation.default // empty" "$CONFIG_FILE")
+  POST_LAUNCH_DELAY_MS=$(jq -r ".apps[\"$ACTIVE_APP\"].timing.postLaunchDelayMs // 1200" "$CONFIG_FILE")
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
   EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
@@ -191,7 +199,7 @@ function login() {
 
   if [ -n "$BUNDLE_ID" ]; then
     echo "Launching app: $BUNDLE_ID"
-    xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+    LAUNCH_OUT=$(xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>/dev/null || true)
   fi
 
   if [ -n "$ORIENTATION" ]; then
@@ -210,6 +218,12 @@ tell application "System Events"
   end tell
 end tell
 OSA
+  fi
+
+  # Wait a bit for app UI to become responsive
+  if [ -n "$POST_LAUNCH_DELAY_MS" ] && [ "$POST_LAUNCH_DELAY_MS" != "0" ]; then
+    SLEEP_SEC=$(awk "BEGIN { printf \"%.3f\", $POST_LAUNCH_DELAY_MS/1000 }")
+    sleep "$SLEEP_SEC"
   fi
 
   axe tap -x $EMAIL_X -y $EMAIL_Y --udid "$UDID"
@@ -342,13 +356,16 @@ function add-app() {
     2) ORI="Landscape" ;;
     *) ORI="Portrait" ;;
   esac
+  echo "Extra wait after launch (ms, Enter for 500):"
+  read WAIT_MS
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
   echo "Enter X Y for email field (default coordinates):"
   read EX EY
   echo "Enter X Y for password field:"
   read PX PY
   echo "Enter X Y for login button:"
   read LX LY
-  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" }, \"timing\": { \"postLaunchDelayMs\": $WAIT_MS } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Added app $APP"
 
   # Offer to add per-device overrides now
