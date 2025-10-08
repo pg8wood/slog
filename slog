@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+CONFIG_FILE="$HOME/.slog.json"
+
+function ensure_axe_installed() {
+  if ! command -v axe &> /dev/null; then
+    echo "AXe not found. Installing..."
+    if ! command -v brew &> /dev/null; then
+      echo "Homebrew not found. Please install Homebrew first: https://brew.sh/"
+      exit 1
+    fi
+    brew tap cameroncooke/formulae
+    brew install axe
+  fi
+}
+
+function setup() {
+  ensure_axe_installed
+
+  echo "Looking for iPhone SE (3rd generation) simulators..."
+  SE_LINES=$(axe list-simulators | grep "iPhone SE (3rd generation)")
+  if [ -z "$SE_LINES" ]; then
+    echo "No iPhone SE (3rd generation) found! Run manually with add-device."
+    exit 1
+  fi
+
+  echo "Matches:"
+  echo "$SE_LINES" | nl -w2 -s'. '
+
+  # Prefer a booted simulator if present
+  BOOTED_LINE=$(echo "$SE_LINES" | grep "| Booted |" | head -n1)
+  if [ -n "$BOOTED_LINE" ]; then
+    CHOSEN_LINE="$BOOTED_LINE"
+    echo "Choosing booted simulator: $CHOSEN_LINE"
+  else
+    CHOSEN_LINE=$(echo "$SE_LINES" | head -n1)
+    echo "No booted simulator found. Choosing first match: $CHOSEN_LINE"
+  fi
+
+  SE_UDID=$(echo "$CHOSEN_LINE" | awk '{print $1}')
+
+  echo "Selected SE UDID: $SE_UDID"
+  echo "Enter username:"
+  read USERNAME
+  echo "Enter password:"
+  read -s PASSWORD
+
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "devices": {
+    "iPhone SE (3rd generation)": {
+      "udid": "$SE_UDID",
+      "coordinates": {
+        "email": { "x": 100, "y": 300 },
+        "password": { "x": 200, "y": 400 },
+        "login": { "x": 200, "y": 510 }
+      }
+    }
+  },
+  "accounts": {
+    "default": {
+      "username": "$USERNAME",
+      "password": "$PASSWORD"
+    }
+  },
+  "activeDevice": "iPhone SE (3rd generation)",
+  "activeAccount": "default"
+}
+EOF
+
+  echo "Config saved to $CONFIG_FILE"
+}
+
+function login() {
+  ensure_axe_installed
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  ACTIVE_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+
+  UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
+  EMAIL_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.email.x" "$CONFIG_FILE")
+  EMAIL_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.email.y" "$CONFIG_FILE")
+  PASS_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.password.x" "$CONFIG_FILE")
+  PASS_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.password.y" "$CONFIG_FILE")
+  LOGIN_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.login.x" "$CONFIG_FILE")
+  LOGIN_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.login.y" "$CONFIG_FILE")
+
+  USERNAME=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].username" "$CONFIG_FILE")
+  PASSWORD=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].password" "$CONFIG_FILE")
+
+  echo "Using device: $ACTIVE_DEVICE ($UDID)"
+  echo "Using account: $ACTIVE_ACCOUNT ($USERNAME)"
+
+  # Verify the simulator is booted; do not attempt to boot automatically
+  DEVICE_STATE=$(axe list-simulators | grep "$UDID" | awk -F'|' '{print $3}' | xargs)
+  if [ "$DEVICE_STATE" != "Booted" ]; then
+    echo "Error: Simulator $UDID is not booted (state: $DEVICE_STATE)."
+    echo "Please boot the simulator manually, then rerun."
+    exit 1
+  fi
+
+  axe tap -x $EMAIL_X -y $EMAIL_Y --udid "$UDID"
+  axe type "$USERNAME" --udid "$UDID"
+
+  axe tap -x $PASS_X -y $PASS_Y --udid "$UDID"
+  axe type "$PASSWORD" --udid "$UDID"
+
+  axe tap -x $LOGIN_X -y $LOGIN_Y --udid "$UDID"
+
+  echo "Login automation completed!"
+}
+
+function add-device() {
+  ensure_axe_installed
+
+  echo "Fetching available simulators (booted only)..."
+  SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+  if [ -z "$SIMS" ]; then
+    echo "No booted simulators found! Please boot a simulator and rerun add-device."
+    exit 1
+  fi
+
+  echo "Select a booted simulator:"
+  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
+
+  select CHOICE in "${SIM_ARRAY[@]}"; do
+    if [ -n "$CHOICE" ]; then
+      UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
+      NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
+      echo "You picked: $NAME ($UDID)"
+      break
+    else
+      echo "Invalid choice"
+    fi
+  done
+
+  echo "Enter X Y for email field:"
+  read EX EY
+  echo "Enter X Y for password field:"
+  read PX PY
+  echo "Enter X Y for login button:"
+  read LX LY
+
+  jq ".devices[\"$NAME\"] = {
+    \"udid\": \"$UDID\",
+    \"coordinates\": {
+      \"email\": { \"x\": $EX, \"y\": $EY },
+      \"password\": { \"x\": $PX, \"y\": $PY },
+      \"login\": { \"x\": $LX, \"y\": $LY }
+    }
+  }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  echo "Added device $NAME"
+}
+
+function add-account() {
+  NAME=$1
+  if [ -z "$NAME" ]; then
+    echo "Usage: $0 add-account \"AccountName\""
+    exit 1
+  fi
+
+  echo "Enter username:"
+  read USER
+  echo "Enter password:"
+  read -s PASS
+
+  jq ".accounts[\"$NAME\"] = {
+    \"username\": \"$USER\",
+    \"password\": \"$PASS\"
+  }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  echo "Added account $NAME"
+}
+
+function switch-device() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  if [ -z "$1" ]; then
+    DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+    if [ -z "$DEVICES" ]; then
+      echo "No devices found in config. Use 'add-device' first."
+      exit 1
+    fi
+    echo "Select a configured device to activate:"
+    IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+    select CHOICE in "${DEV_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+
+  jq ".activeDevice = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active device to $NAME"
+}
+
+function switch-account() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  if [ -z "$1" ]; then
+    ACCOUNTS=$(jq -r '.accounts | keys[]?' "$CONFIG_FILE")
+    if [ -z "$ACCOUNTS" ]; then
+      echo "No accounts found in config. Use 'add-account' first."
+      exit 1
+    fi
+    echo "Select a configured account to activate:"
+    IFS=$'\n' read -rd '' -a ACC_ARRAY <<<"$ACCOUNTS"
+    select CHOICE in "${ACC_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+
+  jq ".activeAccount = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active account to $NAME"
+}
+
+function usage() {
+  cat <<EOF
+Usage: $0 [command]
+
+No arguments:
+  - If no config at $CONFIG_FILE: runs 'setup'
+  - If config exists: runs 'login'
+
+Commands:
+  setup             Initialize config and default device/account
+  login             Automate login on active simulator/account
+  add-device        Add a simulator device and tap coordinates
+  add-account NAME  Add an account; prompts for credentials
+  switch-device NAME
+                    Set the active device
+  switch-account NAME
+                    Set the active account
+  switch device [NAME]
+                    Switch active device (interactive if NAME omitted)
+  switch account [NAME]
+                    Switch active account (interactive if NAME omitted)
+
+Options:
+  -h, -H, --help    Show this help and exit
+EOF
+}
+
+case "$1" in
+  "")
+    if [ ! -f "$CONFIG_FILE" ]; then
+      setup
+    else
+      login
+    fi
+    ;;
+  -h|--help|-H)
+    usage
+    exit 0
+    ;;
+  setup) setup ;;
+  login) login ;;
+  add-device) add-device ;;
+  add-account) shift; add-account "$@" ;;
+  switch-device) shift; switch-device "$@" ;;
+  switch-account) shift; switch-account "$@" ;;
+  switch)
+    shift
+    case "$1" in
+      device)
+        shift; switch-device "$@" ;;
+      account)
+        shift; switch-account "$@" ;;
+      *)
+        echo "Usage: $0 switch {device|account} [NAME]"
+        exit 1 ;;
+    esac
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
