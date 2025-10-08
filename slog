@@ -623,6 +623,34 @@ function switch-all() {
   echo "Switched to device='$CHOSEN_DEVICE', app='$CHOSEN_APP', account='$CHOSEN_ACCOUNT'"
 }
 
+function add-interactive() {
+  ensure_dependencies_installed
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  echo "What would you like to add?"
+  select ITEM in "Device" "App" "Account" "Cancel"; do
+    case "$ITEM" in
+      Device)
+        "$0" add-device
+        break ;;
+      App)
+        "$0" add-app
+        break ;;
+      Account)
+        echo "Enter account name:"
+        read NAME
+        "$0" add-account "$NAME"
+        break ;;
+      Cancel)
+        echo "Cancelled."
+        break ;;
+      *) echo "Invalid choice" ;;
+    esac
+  done
+}
+
 function switch-account() {
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
@@ -666,9 +694,12 @@ Commands:
   login                     Automate login using active app/device/account
   add-device                Add a simulator device (UDID only)
   add-app NAME              Add an app and set default coordinates
+  add account NAME          Add an account; prompts for credentials
+  add device                Shortcut for add-device
+  add app                   Shortcut for add-app (interactive)
+  add                       Interactive: pick what to add
   add-coordinates APP [DEV] Add/override coordinates for app (default or device)
   set-orientation APP [DEV] Set app orientation (default or per-device)
-  add-account NAME          Add an account; prompts for credentials
   set-app-account APP ACC   Set per-app account override
   switch-device NAME
                     Set the active device
@@ -713,6 +744,19 @@ case "$1" in
   switch-device) shift; switch-device "$@" ;;
   switch-app) shift; switch-app "$@" ;;
   switch-account) shift; switch-account "$@" ;;
+  add)
+    shift
+    case "$1" in
+      "") add-interactive ;;
+      device) shift; add-device "$@" ;;
+      app) shift; add-app "$@" ;;
+      account) shift; add-account "$@" ;;
+      *)
+        echo "Usage: $0 add {device|app|account}"
+        echo "       $0 add       # interactive: pick what to add"
+        exit 1 ;;
+    esac
+    ;;
   switch)
     shift
     case "$1" in
