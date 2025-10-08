@@ -18,32 +18,77 @@ function ensure_dependencies_installed() {
   fi
 }
 
+function ensure_config_v1() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return
+  fi
+  CURRENT_VERSION=$(jq -r '.version // empty' "$CONFIG_FILE")
+  if [ "$CURRENT_VERSION" = "1.0.0" ]; then
+    return
+  fi
+  echo "Migrating config to version 1.0.0..."
+  tmp_file="$CONFIG_FILE.tmp"
+  jq '
+    def devices_udid_only: (.devices // {} | to_entries | map({key: .key, value: {udid: .value.udid}}) | from_entries);
+    def coords_per_device: (.devices // {} | to_entries
+      | map(select(.value.coordinates != null) | {(.key): .value.coordinates})
+      | add // {});
+    . as $old |
+    {
+      version: "1.0.0",
+      devices: devices_udid_only,
+      accounts: ($old.accounts // {}),
+      apps: {
+        "DefaultApp": {
+          coordinates:
+            (
+              coords_per_device
+              | if (keys | length) > 0 then . else ({"default": ($old.devices[$old.activeDevice].coordinates // {})}) end
+            ),
+          activeAccount: null
+        }
+      },
+      activeDevice: ($old.activeDevice // ((.devices // {} | keys)[0] // "")),
+      activeApp: "DefaultApp",
+      activeAccount: ($old.activeAccount // (($old.accounts // {} | keys)[0] // ""))
+    }
+  ' "$CONFIG_FILE" > "$tmp_file" && mv "$tmp_file" "$CONFIG_FILE"
+  echo "Migration complete."
+}
+
 function setup() {
   ensure_dependencies_installed
-
-  echo "Looking for iPhone SE (3rd generation) simulators..."
-  SE_LINES=$(axe list-simulators | grep "iPhone SE (3rd generation)")
-  if [ -z "$SE_LINES" ]; then
-    echo "No iPhone SE (3rd generation) found! Run manually with add-device."
+  
+  echo "Fetching available simulators (booted only)..."
+  SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+  if [ -z "$SIMS" ]; then
+    echo "No booted simulators found! Please boot a simulator and rerun setup."
     exit 1
   fi
 
-  echo "Matches:"
-  echo "$SE_LINES" | nl -w2 -s'. '
+  echo "Select a booted simulator to set as active device:"
+  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
+  select CHOICE in "${SIM_ARRAY[@]}"; do
+    if [ -n "$CHOICE" ]; then
+      UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
+      DEVICE_NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
+      echo "You picked: $DEVICE_NAME ($UDID)"
+      break
+    else
+      echo "Invalid choice"
+    fi
+  done
 
-  # Prefer a booted simulator if present
-  BOOTED_LINE=$(echo "$SE_LINES" | grep "| Booted |" | head -n1)
-  if [ -n "$BOOTED_LINE" ]; then
-    CHOSEN_LINE="$BOOTED_LINE"
-    echo "Choosing booted simulator: $CHOSEN_LINE"
-  else
-    CHOSEN_LINE=$(echo "$SE_LINES" | head -n1)
-    echo "No booted simulator found. Choosing first match: $CHOSEN_LINE"
-  fi
+  echo "Enter an app name to configure (e.g., ReceiveStock):"
+  read APP_NAME
 
-  SE_UDID=$(echo "$CHOSEN_LINE" | awk '{print $1}')
+  echo "Enter X Y for email field (default coordinates for $APP_NAME):"
+  read EX EY
+  echo "Enter X Y for password field:"
+  read PX PY
+  echo "Enter X Y for login button:"
+  read LX LY
 
-  echo "Selected SE UDID: $SE_UDID"
   echo "Enter username:"
   read USERNAME
   echo "Enter password:"
@@ -51,13 +96,18 @@ function setup() {
 
   cat > "$CONFIG_FILE" <<EOF
 {
+  "version": "1.0.0",
   "devices": {
-    "iPhone SE (3rd generation)": {
-      "udid": "$SE_UDID",
+    "$DEVICE_NAME": { "udid": "$UDID" }
+  },
+  "apps": {
+    "$APP_NAME": {
       "coordinates": {
-        "email": { "x": 100, "y": 300 },
-        "password": { "x": 200, "y": 400 },
-        "login": { "x": 200, "y": 510 }
+        "default": {
+          "email": { "x": $EX, "y": $EY },
+          "password": { "x": $PX, "y": $PY },
+          "login": { "x": $LX, "y": $LY }
+        }
       }
     }
   },
@@ -67,7 +117,8 @@ function setup() {
       "password": "$PASSWORD"
     }
   },
-  "activeDevice": "iPhone SE (3rd generation)",
+  "activeDevice": "$DEVICE_NAME",
+  "activeApp": "$APP_NAME",
   "activeAccount": "default"
 }
 EOF
@@ -77,6 +128,7 @@ EOF
 
 function login() {
   ensure_dependencies_installed
+  ensure_config_v1
 
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
@@ -84,20 +136,30 @@ function login() {
   fi
 
   ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
-  ACTIVE_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+  ACTIVE_APP=$(jq -r '.activeApp' "$CONFIG_FILE")
+  APP_ACCOUNT=$(jq -r ".apps[\"$ACTIVE_APP\"].activeAccount // empty" "$CONFIG_FILE")
+  GLOBAL_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+  ACTIVE_ACCOUNT=${APP_ACCOUNT:-$GLOBAL_ACCOUNT}
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
-  EMAIL_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.email.x" "$CONFIG_FILE")
-  EMAIL_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.email.y" "$CONFIG_FILE")
-  PASS_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.password.x" "$CONFIG_FILE")
-  PASS_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.password.y" "$CONFIG_FILE")
-  LOGIN_X=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.login.x" "$CONFIG_FILE")
-  LOGIN_Y=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].coordinates.login.y" "$CONFIG_FILE")
+  EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
+  EMAIL_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.y // .apps[\"$ACTIVE_APP\"].coordinates.default.email.y" "$CONFIG_FILE")
+  PASS_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.x // .apps[\"$ACTIVE_APP\"].coordinates.default.password.x" "$CONFIG_FILE")
+  PASS_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.y // .apps[\"$ACTIVE_APP\"].coordinates.default.password.y" "$CONFIG_FILE")
+  LOGIN_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].login.x // .apps[\"$ACTIVE_APP\"].coordinates.default.login.x" "$CONFIG_FILE")
+  LOGIN_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].login.y // .apps[\"$ACTIVE_APP\"].coordinates.default.login.y" "$CONFIG_FILE")
 
   USERNAME=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].username" "$CONFIG_FILE")
   PASSWORD=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].password" "$CONFIG_FILE")
 
+  if [ "$EMAIL_X" = "null" ] || [ "$EMAIL_Y" = "null" ] || [ "$PASS_X" = "null" ] || [ "$PASS_Y" = "null" ] || [ "$LOGIN_X" = "null" ] || [ "$LOGIN_Y" = "null" ]; then
+    echo "Error: Missing coordinates for app '$ACTIVE_APP' (device '$ACTIVE_DEVICE' or default)."
+    echo "Add them with: $0 add-coordinates \"$ACTIVE_APP\" [\"$ACTIVE_DEVICE\"]"
+    exit 1
+  fi
+
   echo "Using device: $ACTIVE_DEVICE ($UDID)"
+  echo "Using app: $ACTIVE_APP"
   echo "Using account: $ACTIVE_ACCOUNT ($USERNAME)"
 
   # Verify the simulator is booted; do not attempt to boot automatically
@@ -121,6 +183,7 @@ function login() {
 
 function add-device() {
   ensure_dependencies_installed
+  ensure_config_v1
 
   echo "Fetching available simulators (booted only)..."
   SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
@@ -143,21 +206,7 @@ function add-device() {
     fi
   done
 
-  echo "Enter X Y for email field:"
-  read EX EY
-  echo "Enter X Y for password field:"
-  read PX PY
-  echo "Enter X Y for login button:"
-  read LX LY
-
-  jq ".devices[\"$NAME\"] = {
-    \"udid\": \"$UDID\",
-    \"coordinates\": {
-      \"email\": { \"x\": $EX, \"y\": $EY },
-      \"password\": { \"x\": $PX, \"y\": $PY },
-      \"login\": { \"x\": $LX, \"y\": $LY }
-    }
-  }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
   echo "Added device $NAME"
 }
@@ -180,6 +229,102 @@ function add-account() {
   }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
   echo "Added account $NAME"
+}
+
+function add-app() {
+  ensure_dependencies_installed
+  ensure_config_v1
+  APP=$1
+  if [ -z "$APP" ]; then
+    echo "Usage: $0 add-app \"AppName\""
+    exit 1
+  fi
+  if jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP already exists."
+    exit 1
+  fi
+  echo "Enter X Y for email field (default coordinates):"
+  read EX EY
+  echo "Enter X Y for password field:"
+  read PX PY
+  echo "Enter X Y for login button:"
+  read LX LY
+  jq ".apps[\"$APP\"] = { \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Added app $APP"
+}
+
+function add-coordinates() {
+  ensure_dependencies_installed
+  ensure_config_v1
+  APP=$1
+  DEVICE_NAME=$2
+  if [ -z "$APP" ]; then
+    echo "Usage: $0 add-coordinates \"AppName\" [\"Device Name\"]"
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  KEY=${DEVICE_NAME:-default}
+  echo "Enter X Y for email field ($APP / $KEY):"
+  read EX EY
+  echo "Enter X Y for password field:"
+  read PX PY
+  echo "Enter X Y for login button:"
+  read LX LY
+  jq ".apps[\"$APP\"].coordinates[\"$KEY\"] = { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Updated coordinates for $APP ($KEY)"
+}
+
+function set-app-account() {
+  ensure_dependencies_installed
+  ensure_config_v1
+  APP=$1
+  ACCOUNT=$2
+  if [ -z "$APP" ] || [ -z "$ACCOUNT" ]; then
+    echo "Usage: $0 set-app-account \"AppName\" \"AccountName\""
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  if ! jq -e ".accounts[\"$ACCOUNT\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "Account $ACCOUNT not found. Use 'add-account' first."
+    exit 1
+  fi
+  jq ".apps[\"$APP\"].activeAccount = \"$ACCOUNT\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Set app $APP account override to $ACCOUNT"
+}
+
+function switch-app() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  ensure_config_v1
+  if [ -z "$1" ]; then
+    APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+    if [ -z "$APPS" ]; then
+      echo "No apps found in config. Use 'add-app' first."
+      exit 1
+    fi
+    echo "Select a configured app to activate:"
+    IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+    select CHOICE in "${APP_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+  jq ".activeApp = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active app to $NAME"
 }
 
 function switch-device() {
@@ -251,16 +396,23 @@ No arguments:
   - If config exists: runs 'login'
 
 Commands:
-  setup             Initialize config and default device/account
-  login             Automate login on active simulator/account
-  add-device        Add a simulator device and tap coordinates
-  add-account NAME  Add an account; prompts for credentials
+  setup                     Initialize config (v1.0.0), device, app, and account
+  login                     Automate login using active app/device/account
+  add-device                Add a simulator device (UDID only)
+  add-app NAME              Add an app and set default coordinates
+  add-coordinates APP [DEV] Add/override coordinates for app (default or device)
+  add-account NAME          Add an account; prompts for credentials
+  set-app-account APP ACC   Set per-app account override
   switch-device NAME
                     Set the active device
+  switch-app NAME
+                    Set the active app
   switch-account NAME
                     Set the active account
   switch device [NAME]
                     Switch active device (interactive if NAME omitted)
+  switch app [NAME]
+                    Switch active app (interactive if NAME omitted)
   switch account [NAME]
                     Switch active account (interactive if NAME omitted)
 
@@ -284,18 +436,24 @@ case "$1" in
   setup) setup ;;
   login) login ;;
   add-device) add-device ;;
+  add-app) shift; add-app "$@" ;;
+  add-coordinates) shift; add-coordinates "$@" ;;
   add-account) shift; add-account "$@" ;;
+  set-app-account) shift; set-app-account "$@" ;;
   switch-device) shift; switch-device "$@" ;;
+  switch-app) shift; switch-app "$@" ;;
   switch-account) shift; switch-account "$@" ;;
   switch)
     shift
     case "$1" in
       device)
         shift; switch-device "$@" ;;
+      app)
+        shift; switch-app "$@" ;;
       account)
         shift; switch-account "$@" ;;
       *)
-        echo "Usage: $0 switch {device|account} [NAME]"
+        echo "Usage: $0 switch {device|app|account} [NAME]"
         exit 1 ;;
     esac
     ;;
