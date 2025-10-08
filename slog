@@ -33,6 +33,7 @@ function ensure_config_v1() {
     def coords_per_device: (.devices // {} | to_entries
       | map(select(.value.coordinates != null) | {(.key): .value.coordinates})
       | add // {});
+    def orientation_default: {"default": null};
     . as $old |
     {
       version: "1.0.0",
@@ -46,6 +47,7 @@ function ensure_config_v1() {
               coords_per_device
               | if (keys | length) > 0 then . else ({"default": ($old.devices[$old.activeDevice].coordinates // {})}) end
             ),
+          orientation: orientation_default,
           activeAccount: null
         }
       },
@@ -86,6 +88,15 @@ function setup() {
   echo "Enter bundle ID for $APP_NAME (e.g., com.example.ReceiveStock):"
   read BUNDLE_ID
 
+  echo "Select default orientation for $APP_NAME:"
+  echo "  1) Portrait"
+  echo "  2) Landscape"
+  read -p "Choose [1-2]: " OR_CHOICE
+  case "$OR_CHOICE" in
+    2) ORI="Landscape" ;;
+    *) ORI="Portrait" ;;
+  esac
+
   echo "Enter X Y for email field (default coordinates for $APP_NAME):"
   read EX EY
   echo "Enter X Y for password field:"
@@ -113,7 +124,8 @@ function setup() {
           "password": { "x": $PX, "y": $PY },
           "login": { "x": $LX, "y": $LY }
         }
-      }
+      },
+      "orientation": { "default": "$ORI" }
     }
   },
   "accounts": {
@@ -146,6 +158,7 @@ function login() {
   GLOBAL_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
   ACTIVE_ACCOUNT=${APP_ACCOUNT:-$GLOBAL_ACCOUNT}
   BUNDLE_ID=$(jq -r ".apps[\"$ACTIVE_APP\"].bundleId // empty" "$CONFIG_FILE")
+  ORIENTATION=$(jq -r ".apps[\"$ACTIVE_APP\"].orientation[\"$ACTIVE_DEVICE\"] // .apps[\"$ACTIVE_APP\"].orientation.default // empty" "$CONFIG_FILE")
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
   EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
@@ -179,6 +192,24 @@ function login() {
   if [ -n "$BUNDLE_ID" ]; then
     echo "Launching app: $BUNDLE_ID"
     xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+  fi
+
+  if [ -n "$ORIENTATION" ]; then
+    echo "Setting orientation: $ORIENTATION"
+    # Note: You may be prompted to grant Terminal automation permissions the first time
+    osascript <<OSA || true
+tell application "Simulator" to activate
+tell application "System Events"
+  tell process "Simulator"
+    try
+      click (first menu item whose name starts with "$ACTIVE_DEVICE") of menu "Window" of menu bar 1
+    end try
+    try
+      click menu item "$ORIENTATION" of menu "Orientation" of menu item "Orientation" of menu "Device" of menu bar 1
+    end try
+  end tell
+end tell
+OSA
   fi
 
   axe tap -x $EMAIL_X -y $EMAIL_Y --udid "$UDID"
@@ -220,6 +251,53 @@ function add-device() {
   jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
   echo "Added device $NAME"
+
+  # Offer to add per-app overrides now
+  APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+  if [ -n "$APPS" ]; then
+    echo "Add per-app overrides (coordinates/orientation) for this device now? (y/N)"
+    read yn
+    case "$yn" in
+      y|Y|yes|YES)
+        IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+        # Append a Done option
+        APP_ARRAY+=("Done")
+        while true; do
+          echo "Select an app to configure for $NAME (or Done):"
+          select CHOICE in "${APP_ARRAY[@]}"; do
+            if [ -z "$CHOICE" ]; then
+              echo "Invalid choice"
+              break
+            fi
+            if [ "$CHOICE" = "Done" ]; then
+              echo "Finished adding overrides."
+              break 2
+            fi
+            APP_NAME="$CHOICE"
+            echo "Selected app: $APP_NAME"
+            echo "Select orientation for $APP_NAME ($NAME):"
+            echo "  1) Portrait"
+            echo "  2) Landscape"
+            read -p "Choose [1-2]: " OR_CHOICE2
+            case "$OR_CHOICE2" in
+              2) ORI2="Landscape" ;;
+              *) ORI2="Portrait" ;;
+            esac
+            echo "Enter X Y for email field ($APP_NAME / $NAME):"
+            read EX2 EY2
+            echo "Enter X Y for password field ($APP_NAME / $NAME):"
+            read PX2 PY2
+            echo "Enter X Y for login button ($APP_NAME / $NAME):"
+            read LX2 LY2
+            jq ".apps[\"$APP_NAME\"].coordinates[\"$NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP_NAME\"].orientation[\"$NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            echo "Added overrides for $APP_NAME ($NAME)"
+            break
+          done
+        done
+        ;;
+      *) ;;
+    esac
+  fi
 }
 
 function add-account() {
@@ -247,8 +325,8 @@ function add-app() {
   ensure_config_v1
   APP=$1
   if [ -z "$APP" ]; then
-    echo "Usage: $0 add-app \"AppName\""
-    exit 1
+    echo "Enter app name:"
+    read APP
   fi
   if jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
     echo "App $APP already exists."
@@ -256,14 +334,95 @@ function add-app() {
   fi
   echo "Enter bundle ID for $APP (e.g., com.example.App):"
   read BUNDLE_ID
+  echo "Select default orientation for $APP:"
+  echo "  1) Portrait"
+  echo "  2) Landscape"
+  read -p "Choose [1-2]: " OR_CHOICE
+  case "$OR_CHOICE" in
+    2) ORI="Landscape" ;;
+    *) ORI="Portrait" ;;
+  esac
   echo "Enter X Y for email field (default coordinates):"
   read EX EY
   echo "Enter X Y for password field:"
   read PX PY
   echo "Enter X Y for login button:"
   read LX LY
-  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Added app $APP"
+
+  # Offer to add per-device overrides now
+  DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+  if [ -n "$DEVICES" ]; then
+    echo "Add per-device overrides (coordinates/orientation) now? (y/N)"
+    read yn
+    case "$yn" in
+      y|Y|yes|YES)
+        IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+        # Append a Done option
+        DEV_ARRAY+=("Done")
+        while true; do
+          echo "Select a device to configure (or Done):"
+          select CHOICE in "${DEV_ARRAY[@]}"; do
+            if [ -z "$CHOICE" ]; then
+              echo "Invalid choice"
+              break
+            fi
+            if [ "$CHOICE" = "Done" ]; then
+              echo "Finished adding overrides."
+              break 2
+            fi
+            DEVICE_NAME="$CHOICE"
+            echo "Selected: $DEVICE_NAME"
+            echo "Select orientation for $APP ($DEVICE_NAME):"
+            echo "  1) Portrait"
+            echo "  2) Landscape"
+            read -p "Choose [1-2]: " OR_CHOICE2
+            case "$OR_CHOICE2" in
+              2) ORI2="Landscape" ;;
+              *) ORI2="Portrait" ;;
+            esac
+            echo "Enter X Y for email field ($APP / $DEVICE_NAME):"
+            read EX2 EY2
+            echo "Enter X Y for password field ($APP / $DEVICE_NAME):"
+            read PX2 PY2
+            echo "Enter X Y for login button ($APP / $DEVICE_NAME):"
+            read LX2 LY2
+            jq ".apps[\"$APP\"].coordinates[\"$DEVICE_NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP\"].orientation[\"$DEVICE_NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            echo "Added overrides for $APP ($DEVICE_NAME)"
+            break
+          done
+        done
+        ;;
+      *) ;;
+    esac
+  fi
+}
+
+function set-orientation() {
+  ensure_dependencies_installed
+  ensure_config_v1
+  APP=$1
+  DEVICE_NAME=$2
+  if [ -z "$APP" ]; then
+    echo "Usage: $0 set-orientation \"AppName\" [\"Device Name\"]"
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  KEY=${DEVICE_NAME:-default}
+  echo "Select orientation for $APP ($KEY):"
+  echo "  1) Portrait"
+  echo "  2) Landscape"
+  read -p "Choose [1-2]: " OR_CHOICE
+  case "$OR_CHOICE" in
+    2) ORI="Landscape" ;;
+    *) ORI="Portrait" ;;
+  esac
+  jq ".apps[\"$APP\"].orientation[\"$KEY\"] = \"$ORI\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Set orientation for $APP ($KEY) to $ORI"
 }
 
 function add-coordinates() {
@@ -414,6 +573,7 @@ Commands:
   add-device                Add a simulator device (UDID only)
   add-app NAME              Add an app and set default coordinates
   add-coordinates APP [DEV] Add/override coordinates for app (default or device)
+  set-orientation APP [DEV] Set app orientation (default or per-device)
   add-account NAME          Add an account; prompts for credentials
   set-app-account APP ACC   Set per-app account override
   switch-device NAME
@@ -451,6 +611,7 @@ case "$1" in
   add-device) add-device ;;
   add-app) shift; add-app "$@" ;;
   add-coordinates) shift; add-coordinates "$@" ;;
+  set-orientation) shift; set-orientation "$@" ;;
   add-account) shift; add-account "$@" ;;
   set-app-account) shift; set-app-account "$@" ;;
   switch-device) shift; switch-device "$@" ;;
