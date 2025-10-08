@@ -681,6 +681,19 @@ function switch-account() {
   echo "Switched active account to $NAME"
 }
 
+function config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  echo "Config file: $CONFIG_FILE"
+  if command -v jq >/dev/null 2>&1; then
+    jq . "$CONFIG_FILE"
+  else
+    cat "$CONFIG_FILE"
+  fi
+}
+
 function usage() {
   cat <<EOF
 Usage: $0 [command]
@@ -715,6 +728,8 @@ Commands:
                     Switch active account (interactive if NAME omitted)
   switch
                      Interactive: pick device, app, account
+  config
+                     Print current configuration (JSON)
 
 Options:
   -h, -H, --help    Show this help and exit
@@ -744,6 +759,7 @@ case "$1" in
   switch-device) shift; switch-device "$@" ;;
   switch-app) shift; switch-app "$@" ;;
   switch-account) shift; switch-account "$@" ;;
+  config) config ;;
   add)
     shift
     case "$1" in
