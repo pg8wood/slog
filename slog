@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 CONFIG_FILE="$HOME/.slog.json"
 
-function ensure_axe_installed() {
+function ensure_dependencies_installed() {
+  MISSING=0
   if ! command -v axe &> /dev/null; then
-    echo "AXe not found. Installing..."
-    if ! command -v brew &> /dev/null; then
-      echo "Homebrew not found. Please install Homebrew first: https://brew.sh/"
-      exit 1
-    fi
-    brew tap cameroncooke/formulae
-    brew install axe
+    echo "Error: 'axe' not found. Install via Homebrew:"
+    echo "  brew tap cameroncooke/formulae && brew install axe"
+    MISSING=1
+  fi
+  if ! command -v jq &> /dev/null; then
+    echo "Error: 'jq' not found. Install via Homebrew:"
+    echo "  brew install jq"
+    MISSING=1
+  fi
+  if [ "$MISSING" -eq 1 ]; then
+    exit 1
   fi
 }
 
 function setup() {
-  ensure_axe_installed
+  ensure_dependencies_installed
 
   echo "Looking for iPhone SE (3rd generation) simulators..."
   SE_LINES=$(axe list-simulators | grep "iPhone SE (3rd generation)")
@@ -71,7 +76,7 @@ EOF
 }
 
 function login() {
-  ensure_axe_installed
+  ensure_dependencies_installed
 
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
@@ -115,7 +120,7 @@ function login() {
 }
 
 function add-device() {
-  ensure_axe_installed
+  ensure_dependencies_installed
 
   echo "Fetching available simulators (booted only)..."
   SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
