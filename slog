@@ -2,6 +2,21 @@
 CONFIG_FILE="$HOME/.slog.json"
 SLOG_VERSION="1.0.0"
 
+function init_colors() {
+  if [ -n "$NO_COLOR" ] || [ ! -t 1 ]; then
+    C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_CYAN="";
+  else
+    C_RESET='\033[0m'
+    C_BOLD='\033[1m'
+    C_DIM='\033[2m'
+    C_RED='\033[31m'
+    C_GREEN='\033[32m'
+    C_YELLOW='\033[33m'
+    C_BLUE='\033[34m'
+    C_CYAN='\033[36m'
+  fi
+}
+
 function ensure_dependencies_installed() {
   MISSING=0
   if ! command -v axe &> /dev/null; then
@@ -20,59 +35,100 @@ function ensure_dependencies_installed() {
 }
 
 
+function print_banner() {
+  printf "%b" "${C_GREEN}"
+  cat <<ASCII
+          _____                    _____           _______                   _____          
+         /\    \                  /\    \         /::\    \                 /\    \         
+        /::\    \                /::\____\       /::::\    \               /::\    \        
+       /::::\    \              /:::/    /      /::::::\    \             /::::\    \       
+      /::::::\    \            /:::/    /      /::::::::\    \           /::::::\    \      
+     /:::/\:::\    \          /:::/    /      /:::/~~\:::\    \         /:::/\:::\    \     
+    /:::/__\:::\    \        /:::/    /      /:::/    \:::\    \       /:::/  \:::\    \    
+    \:::\   \:::\    \      /:::/    /      /:::/    / \:::\    \     /:::/    \:::\    \   
+  ___\:::\   \:::\    \    /:::/    /      /:::/____/   \:::\____\   /:::/    / \:::\    \  
+ /\   \:::\   \:::\    \  /:::/    /      |:::|    |     |:::|    | /:::/    /   \:::\ ___\ 
+/::\   \:::\   \:::\____\/:::/____/       |:::|____|     |:::|    |/:::/____/  ___\:::|    |
+\:::\   \:::\   \::/    /\:::\    \        \:::\    \   /:::/    / \:::\    \ /\  /:::|____|
+ \:::\   \:::\   \/____/  \:::\    \        \:::\    \ /:::/    /   \:::\    /::\ \::/    / 
+  \:::\   \:::\    \       \:::\    \        \:::\    /:::/    /     \:::\   \:::\ \/____/  
+   \:::\   \:::\____\       \:::\    \        \:::\__/:::/    /       \:::\   \:::\____\    
+    \:::\  /:::/    /        \:::\    \        \::::::::/    /         \:::\  /:::/    /    
+     \:::\/:::/    /          \:::\    \        \::::::/    /           \:::\/:::/    /     
+      \::::::/    /            \:::\    \        \::::/    /             \::::::/    /      
+       \::::/    /              \:::\____\        \::/____/               \::::/    /       
+        \::/    /                \::/    /         ~~                      \::/____/        
+         \/____/                  \/____/                                                   
+
+
+
+                                      
+                                                                                            
+                    slog v$SLOG_VERSION. Simulator logins shouldn't be a slog.                                                                           
+ASCII
+  printf "\n" 
+  echo -n ""
+  printf "%b\n" "${C_RESET}"
+  echo
+}
+
 function setup() {
   ensure_dependencies_installed
+  init_colors
+  print_banner
   
-  echo "Fetching available simulators (booted only)..."
+  printf "%b\n" "${C_BLUE}Fetching available simulators (booted only)...${C_RESET}"
   SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
   if [ -z "$SIMS" ]; then
-    echo "No booted simulators found! Please boot a simulator and rerun setup."
+    printf "%b\n" "${C_RED}No booted simulators found! Please boot a simulator and rerun setup.${C_RESET}"
     exit 1
   fi
 
-  echo "Select a booted simulator to set as active device:"
+  printf "%b\n" "${C_BOLD}Select a booted simulator to set as active device:${C_RESET}"
   IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
   select CHOICE in "${SIM_ARRAY[@]}"; do
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       DEVICE_NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      echo "You picked: $DEVICE_NAME ($UDID)"
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DEVICE_NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
-      echo "Invalid choice"
+      printf "%b\n" "${C_YELLOW}Invalid choice${C_RESET}"
     fi
   done
 
-  echo "Enter an app name to configure (e.g., ReceiveStock):"
+  printf "%b" "${C_BOLD}Enter an app name to configure${C_RESET} (e.g., ReceiveStock): "
   read APP_NAME
 
-  echo "Enter bundle ID for $APP_NAME (e.g., com.example.ReceiveStock):"
+  printf "%b" "Enter bundle ID for ${C_CYAN}$APP_NAME${C_RESET} (e.g., com.example.ReceiveStock): "
   read BUNDLE_ID
 
-  echo "Select default orientation for $APP_NAME:"
-  echo "  1) Portrait"
-  echo "  2) Landscape"
+  printf "%b\n" "${C_BOLD}Select default orientation for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
+  printf "  1) Portrait %b(default)%b\n" "${C_DIM}" "${C_RESET}"
+  printf "  2) Landscape\n"
   read -p "Choose [1-2]: " OR_CHOICE
   case "$OR_CHOICE" in
     2) ORI="Landscape" ;;
     *) ORI="Portrait" ;;
   esac
 
-  echo "Extra wait after launch (ms, Enter for 1200):"
+  printf "%b" "Extra wait after launch (ms) ${C_DIM}[default: 500]${C_RESET}: "
   read WAIT_MS
-  if [ -z "$WAIT_MS" ]; then WAIT_MS=1200; fi
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
 
-  echo "Enter X Y for email field (default coordinates for $APP_NAME):"
+  printf "%b\n" "${C_BOLD}Enter default coordinates for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
+  printf "Enter X Y for %bemail%b field:\n" "${C_BOLD}" "${C_RESET}"
   read EX EY
-  echo "Enter X Y for password field:"
+  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
   read PX PY
-  echo "Enter X Y for login button:"
+  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
   read LX LY
 
-  echo "Enter username:"
+  printf "%b" "Enter username: "
   read USERNAME
-  echo "Enter password:"
+  printf "%b" "Enter password: "
   read -s PASSWORD
+  echo
 
   cat > "$CONFIG_FILE" <<EOF
 {
@@ -107,14 +163,15 @@ function setup() {
 }
 EOF
 
-  echo "Config saved to $CONFIG_FILE"
+  printf "%b\n" "${C_GREEN}Config saved${C_RESET} to ${C_DIM}$CONFIG_FILE${C_RESET}"
 }
 
 function login() {
   ensure_dependencies_installed
+  init_colors
 
   if [ ! -f "$CONFIG_FILE" ]; then
-    echo "No config found. Run '$0 setup' first."
+    printf "%b\n" "${C_RED}No config found.${C_RESET} Run '${C_BOLD}$0 setup${C_RESET}' first."
     exit 1
   fi
 
@@ -144,25 +201,25 @@ function login() {
     exit 1
   fi
 
-  echo "Using device: $ACTIVE_DEVICE ($UDID)"
-  echo "Using app: $ACTIVE_APP"
-  echo "Using account: $ACTIVE_ACCOUNT ($USERNAME)"
+  printf "%b\n" "Using device: ${C_CYAN}$ACTIVE_DEVICE${C_RESET} ${C_DIM}($UDID)${C_RESET}"
+  printf "%b\n" "Using app:    ${C_CYAN}$ACTIVE_APP${C_RESET}"
+  printf "%b\n" "Using account:${C_CYAN}$ACTIVE_ACCOUNT${C_RESET} ${C_DIM}($USERNAME)${C_RESET}"
 
   # Verify the simulator is booted; do not attempt to boot automatically
   DEVICE_STATE=$(axe list-simulators | grep "$UDID" | awk -F'|' '{print $3}' | xargs)
   if [ "$DEVICE_STATE" != "Booted" ]; then
-    echo "Error: Simulator $UDID is not booted (state: $DEVICE_STATE)."
-    echo "Please boot the simulator manually, then rerun."
+    printf "%b\n" "${C_RED}Error:${C_RESET} Simulator $UDID is not booted (state: $DEVICE_STATE)."
+    printf "%b\n" "Please boot the simulator manually, then rerun."
     exit 1
   fi
 
   if [ -n "$BUNDLE_ID" ]; then
-    echo "Launching app: $BUNDLE_ID"
+    printf "%b\n" "Launching app: ${C_CYAN}$BUNDLE_ID${C_RESET}"
     LAUNCH_OUT=$(xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>/dev/null || true)
   fi
 
   if [ -n "$ORIENTATION" ]; then
-    echo "Setting orientation: $ORIENTATION"
+    printf "%b\n" "Setting orientation: ${C_CYAN}$ORIENTATION${C_RESET}"
     # Note: You may be prompted to grant Terminal automation permissions the first time
     osascript <<OSA || true
 tell application "Simulator" to activate
@@ -193,27 +250,27 @@ OSA
 
   axe tap -x $LOGIN_X -y $LOGIN_Y --udid "$UDID"
 
-  echo "Login automation completed!"
+  printf "%b\n" "${C_GREEN}Login automation completed!${C_RESET}"
 }
 
 function add-device() {
   ensure_dependencies_installed
 
-  echo "Fetching available simulators (booted only)..."
+  printf "%b\n" "${C_BLUE}Fetching available simulators (booted only)...${C_RESET}"
   SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
   if [ -z "$SIMS" ]; then
     echo "No booted simulators found! Please boot a simulator and rerun add-device."
     exit 1
   fi
 
-  echo "Select a booted simulator:"
+  printf "%b\n" "${C_BOLD}Select a booted simulator:${C_RESET}"
   IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
 
   select CHOICE in "${SIM_ARRAY[@]}"; do
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      echo "You picked: $NAME ($UDID)"
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
       echo "Invalid choice"
@@ -222,12 +279,12 @@ function add-device() {
 
   jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-  echo "Added device $NAME"
+  printf "%b\n" "${C_GREEN}Added device${C_RESET} $NAME"
 
   # Offer to add per-app overrides now
   APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
   if [ -n "$APPS" ]; then
-    echo "Add per-app overrides (coordinates/orientation) for this device now? (y/N)"
+    printf "%b\n" "Add per-app overrides (coordinates/orientation) for this device now? ${C_DIM}(y/N)${C_RESET}"
     read yn
     case "$yn" in
       y|Y|yes|YES)
@@ -235,7 +292,7 @@ function add-device() {
         # Append a Done option
         APP_ARRAY+=("Done")
         while true; do
-          echo "Select an app to configure for $NAME (or Done):"
+          printf "%b\n" "${C_BOLD}Select an app to configure for ${C_CYAN}$NAME${C_RESET} (or Done):${C_RESET}"
           select CHOICE in "${APP_ARRAY[@]}"; do
             if [ -z "$CHOICE" ]; then
               echo "Invalid choice"
@@ -246,7 +303,7 @@ function add-device() {
               break 2
             fi
             APP_NAME="$CHOICE"
-            echo "Selected app: $APP_NAME"
+            printf "%b\n" "Selected app: ${C_CYAN}$APP_NAME${C_RESET}"
             echo "Select orientation for $APP_NAME ($NAME):"
             echo "  1) Portrait"
             echo "  2) Landscape"
@@ -255,14 +312,14 @@ function add-device() {
               2) ORI2="Landscape" ;;
               *) ORI2="Portrait" ;;
             esac
-            echo "Enter X Y for email field ($APP_NAME / $NAME):"
+            printf "Enter X Y for %bemail%b field ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
             read EX2 EY2
-            echo "Enter X Y for password field ($APP_NAME / $NAME):"
+            printf "Enter X Y for %bpassword%b field ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
             read PX2 PY2
-            echo "Enter X Y for login button ($APP_NAME / $NAME):"
+            printf "Enter X Y for %blogin%b button ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
             read LX2 LY2
             jq ".apps[\"$APP_NAME\"].coordinates[\"$NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP_NAME\"].orientation[\"$NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-            echo "Added overrides for $APP_NAME ($NAME)"
+            printf "%b\n" "${C_GREEN}Added overrides${C_RESET} for $APP_NAME ${C_DIM}($NAME)${C_RESET}"
             break
           done
         done
@@ -316,11 +373,11 @@ function add-app() {
   echo "Extra wait after launch (ms, Enter for 500):"
   read WAIT_MS
   if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
-  echo "Enter X Y for email field (default coordinates):"
+  printf "Enter X Y for %bemail%b field (default coordinates):\n" "${C_BOLD}" "${C_RESET}"
   read EX EY
-  echo "Enter X Y for password field:"
+  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
   read PX PY
-  echo "Enter X Y for login button:"
+  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
   read LX LY
   jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" }, \"timing\": { \"postLaunchDelayMs\": $WAIT_MS } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Added app $APP"
@@ -356,11 +413,11 @@ function add-app() {
               2) ORI2="Landscape" ;;
               *) ORI2="Portrait" ;;
             esac
-            echo "Enter X Y for email field ($APP / $DEVICE_NAME):"
+            printf "Enter X Y for %bemail%b field ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
             read EX2 EY2
-            echo "Enter X Y for password field ($APP / $DEVICE_NAME):"
+            printf "Enter X Y for %bpassword%b field ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
             read PX2 PY2
-            echo "Enter X Y for login button ($APP / $DEVICE_NAME):"
+            printf "Enter X Y for %blogin%b button ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
             read LX2 LY2
             jq ".apps[\"$APP\"].coordinates[\"$DEVICE_NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP\"].orientation[\"$DEVICE_NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             echo "Added overrides for $APP ($DEVICE_NAME)"
@@ -411,11 +468,11 @@ function add-coordinates() {
     exit 1
   fi
   KEY=${DEVICE_NAME:-default}
-  echo "Enter X Y for email field ($APP / $KEY):"
+  printf "Enter X Y for %bemail%b field ($APP / $KEY):\n" "${C_BOLD}" "${C_RESET}"
   read EX EY
-  echo "Enter X Y for password field:"
+  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
   read PX PY
-  echo "Enter X Y for login button:"
+  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
   read LX LY
   jq ".apps[\"$APP\"].coordinates[\"$KEY\"] = { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Updated coordinates for $APP ($KEY)"
@@ -524,6 +581,7 @@ function switch-device() {
 
 function switch-all() {
   ensure_dependencies_installed
+  init_colors
 
   if [ ! -f "$CONFIG_FILE" ]; then
     echo "No config found. Run '$0 setup' first."
@@ -545,12 +603,13 @@ function switch-all() {
   for i in "${!DEV_ARRAY[@]}"; do
     idx=$((i+1))
     if [ "${DEV_ARRAY[$i]}" = "$ACTIVE_DEVICE" ]; then
-      echo "  $idx) ${DEV_ARRAY[$i]} [current]"
+      printf "  %s) %s %b[current]%b\n" "$idx" "${DEV_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
     else
       echo "  $idx) ${DEV_ARRAY[$i]}"
     fi
   done
-  read -p "Device number: " DEV_SEL
+  printf "Select number (Enter for current): "
+  read DEV_SEL
   if [ -z "$DEV_SEL" ]; then
     CHOSEN_DEVICE="$ACTIVE_DEVICE"
   else
@@ -572,12 +631,13 @@ function switch-all() {
   for i in "${!APP_ARRAY[@]}"; do
     idx=$((i+1))
     if [ "${APP_ARRAY[$i]}" = "$ACTIVE_APP" ]; then
-      echo "  $idx) ${APP_ARRAY[$i]} [current]"
+      printf "  %s) %s %b[current]%b\n" "$idx" "${APP_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
     else
       echo "  $idx) ${APP_ARRAY[$i]}"
     fi
   done
-  read -p "App number: " APP_SEL
+  printf "Select number (Enter for current): "
+  read APP_SEL
   if [ -z "$APP_SEL" ]; then
     CHOSEN_APP="$ACTIVE_APP"
   else
@@ -599,12 +659,13 @@ function switch-all() {
   for i in "${!ACC_ARRAY[@]}"; do
     idx=$((i+1))
     if [ "${ACC_ARRAY[$i]}" = "$ACTIVE_ACCOUNT" ]; then
-      echo "  $idx) ${ACC_ARRAY[$i]} [current]"
+      printf "  %s) %s %b[current]%b\n" "$idx" "${ACC_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
     else
       echo "  $idx) ${ACC_ARRAY[$i]}"
     fi
   done
-  read -p "Account number: " ACC_SEL
+  printf "Select number (Enter for current): "
+  read ACC_SEL
   if [ -z "$ACC_SEL" ]; then
     CHOSEN_ACCOUNT="$ACTIVE_ACCOUNT"
   else
@@ -616,11 +677,18 @@ function switch-all() {
   fi
 
   # Apply selections using existing commands (booting and foregrounding via switch-device)
-  "$0" switch-device "$CHOSEN_DEVICE"
-  "$0" switch-app "$CHOSEN_APP"
-  "$0" switch-account "$CHOSEN_ACCOUNT"
+  "$0" switch-device "$CHOSEN_DEVICE" >/dev/null
+  "$0" switch-app "$CHOSEN_APP" >/dev/null
+  "$0" switch-account "$CHOSEN_ACCOUNT" >/dev/null
 
-  echo "Switched to device='$CHOSEN_DEVICE', app='$CHOSEN_APP', account='$CHOSEN_ACCOUNT'"
+  # Decorated summary
+  CHOSEN_UDID=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].udid" "$CONFIG_FILE")
+  SEL_USERNAME=$(jq -r ".accounts[\"$CHOSEN_ACCOUNT\"].username" "$CONFIG_FILE")
+  printf "\n%b%s%b switched to:\n" "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
+  printf "  App:       %b%s%b\n" "${C_CYAN}${C_BOLD}" "$CHOSEN_APP" "${C_RESET}"
+  printf "  Simulator: %b%s%b %b(%s)%b\n" "${C_BLUE}${C_BOLD}" "$CHOSEN_DEVICE" "${C_RESET}" "${C_DIM}" "$CHOSEN_UDID" "${C_RESET}"
+  printf "  Account:   %b%s%b %b(%s)%b\n" "${C_YELLOW}${C_BOLD}" "$CHOSEN_ACCOUNT" "${C_RESET}" "${C_DIM}" "$SEL_USERNAME" "${C_RESET}"
+  printf "\nRun %b%s%b to log in." "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
 }
 
 function add-interactive() {
