@@ -17,6 +17,33 @@ function init_colors() {
   fi
 }
 
+function prompt_xy() {
+  # Usage: prompt_xy <label> [suffix] [example]
+  # Sets globals: X_OUT, Y_OUT
+  init_colors
+  local label="$1"
+  local suffix="$2"
+  local example="$3"
+  local line
+  while true; do
+    if [ -n "$example" ]; then
+      printf "Enter X Y for %b%s%b %s %b(e.g., %s)%b\n" "${C_BOLD}" "$label" "${C_RESET}" "$suffix" "${C_DIM}" "$example" "${C_RESET}"
+    else
+      printf "Enter X Y for %b%s%b %s\n" "${C_BOLD}" "$label" "${C_RESET}" "$suffix"
+    fi
+    read -r line
+    # trim
+    line="${line#${line%%[!$' \t']*}}"; line="${line%${line##*[!$' \t']}}"
+    if [[ "$line" =~ ^[0-9]+([.][0-9]+)?[[:space:]]+[0-9]+([.][0-9]+)?$ ]]; then
+      X_OUT=$(awk '{print $1}' <<<"$line")
+      Y_OUT=$(awk '{print $2}' <<<"$line")
+      break
+    else
+      printf "%bInvalid input.%b Please enter two numbers like '100 300'.\n" "${C_RED}" "${C_RESET}"
+    fi
+  done
+}
+
 function ensure_dependencies_installed() {
   MISSING=0
   if ! command -v axe &> /dev/null; then
@@ -66,10 +93,7 @@ function print_banner() {
                                                                                             
                     slog v$SLOG_VERSION. Simulator logins shouldn't be a slog.                                                                           
 ASCII
-  printf "\n" 
-  echo -n ""
-  printf "%b\n" "${C_RESET}"
-  echo
+  printf "%b\n\n" "${C_RESET}"
 }
 
 function setup() {
@@ -97,10 +121,10 @@ function setup() {
     fi
   done
 
-  printf "%b" "${C_BOLD}Enter an app name to configure${C_RESET} (e.g., ReceiveStock): "
+  printf "%b" "${C_BOLD}Enter an app name to configure${C_RESET} (e.g., slog): "
   read APP_NAME
 
-  printf "%b" "Enter bundle ID for ${C_CYAN}$APP_NAME${C_RESET} (e.g., com.example.ReceiveStock): "
+  printf "%b" "Enter bundle ID for ${C_CYAN}$APP_NAME${C_RESET} (e.g., com.patrickgatewood.slog): "
   read BUNDLE_ID
 
   printf "%b\n" "${C_BOLD}Select default orientation for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
@@ -117,12 +141,12 @@ function setup() {
   if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
 
   printf "%b\n" "${C_BOLD}Enter default coordinates for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
-  printf "Enter X Y for %bemail%b field:\n" "${C_BOLD}" "${C_RESET}"
-  read EX EY
-  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
-  read PX PY
-  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
-  read LX LY
+  prompt_xy "email" "field" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
 
   printf "%b" "Enter username: "
   read USERNAME
@@ -163,7 +187,8 @@ function setup() {
 }
 EOF
 
-  printf "%b\n" "${C_GREEN}Config saved${C_RESET} to ${C_DIM}$CONFIG_FILE${C_RESET}"
+  printf "%b\n" "Config saved to ${C_DIM}$CONFIG_FILE${C_RESET}"
+  printf "\nRun %b%s%b to log in." "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
 }
 
 function login() {
@@ -312,12 +337,12 @@ function add-device() {
               2) ORI2="Landscape" ;;
               *) ORI2="Portrait" ;;
             esac
-            printf "Enter X Y for %bemail%b field ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read EX2 EY2
-            printf "Enter X Y for %bpassword%b field ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read PX2 PY2
-            printf "Enter X Y for %blogin%b button ($APP_NAME / $NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read LX2 LY2
+            prompt_xy "email" "field ($APP_NAME / $NAME)" "100 300"
+            EX2="$X_OUT"; EY2="$Y_OUT"
+            prompt_xy "password" "field ($APP_NAME / $NAME)" "200 400"
+            PX2="$X_OUT"; PY2="$Y_OUT"
+            prompt_xy "login" "button ($APP_NAME / $NAME)" "200 510"
+            LX2="$X_OUT"; LY2="$Y_OUT"
             jq ".apps[\"$APP_NAME\"].coordinates[\"$NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP_NAME\"].orientation[\"$NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             printf "%b\n" "${C_GREEN}Added overrides${C_RESET} for $APP_NAME ${C_DIM}($NAME)${C_RESET}"
             break
@@ -373,12 +398,12 @@ function add-app() {
   echo "Extra wait after launch (ms, Enter for 500):"
   read WAIT_MS
   if [ -z "$WAIT_MS" ]; then WAIT_MS=500; fi
-  printf "Enter X Y for %bemail%b field (default coordinates):\n" "${C_BOLD}" "${C_RESET}"
-  read EX EY
-  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
-  read PX PY
-  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
-  read LX LY
+  prompt_xy "email" "field (default coordinates)" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
   jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" }, \"timing\": { \"postLaunchDelayMs\": $WAIT_MS } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Added app $APP"
 
@@ -413,12 +438,12 @@ function add-app() {
               2) ORI2="Landscape" ;;
               *) ORI2="Portrait" ;;
             esac
-            printf "Enter X Y for %bemail%b field ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read EX2 EY2
-            printf "Enter X Y for %bpassword%b field ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read PX2 PY2
-            printf "Enter X Y for %blogin%b button ($APP / $DEVICE_NAME):\n" "${C_BOLD}" "${C_RESET}"
-            read LX2 LY2
+            prompt_xy "email" "field ($APP / $DEVICE_NAME)" "100 300"
+            EX2="$X_OUT"; EY2="$Y_OUT"
+            prompt_xy "password" "field ($APP / $DEVICE_NAME)" "200 400"
+            PX2="$X_OUT"; PY2="$Y_OUT"
+            prompt_xy "login" "button ($APP / $DEVICE_NAME)" "200 510"
+            LX2="$X_OUT"; LY2="$Y_OUT"
             jq ".apps[\"$APP\"].coordinates[\"$DEVICE_NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP\"].orientation[\"$DEVICE_NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             echo "Added overrides for $APP ($DEVICE_NAME)"
             break
@@ -468,12 +493,12 @@ function add-coordinates() {
     exit 1
   fi
   KEY=${DEVICE_NAME:-default}
-  printf "Enter X Y for %bemail%b field ($APP / $KEY):\n" "${C_BOLD}" "${C_RESET}"
-  read EX EY
-  printf "Enter X Y for %bpassword%b field:\n" "${C_BOLD}" "${C_RESET}"
-  read PX PY
-  printf "Enter X Y for %blogin%b button:\n" "${C_BOLD}" "${C_RESET}"
-  read LX LY
+  prompt_xy "email" "field ($APP / $KEY)" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
   jq ".apps[\"$APP\"].coordinates[\"$KEY\"] = { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   echo "Updated coordinates for $APP ($KEY)"
 }
