@@ -15,11 +15,10 @@ A tiny CLI that launches your iOS Simulator app and taps through the login scree
 ---
 
 ## ⚙️ Requirements
-- macOS with Xcode Simulators installed (xcrun simctl available)
+- macOS with Xcode Simulators installed (`xcrun simctl` is available)
 - Homebrew
-- jq
-- AXe (installed via Homebrew)
-
+- An app with a single-screen login flow (Username + Password fields + Login button).
+  - For more complex login flows, use `slog repl` to build and run a custom login script.
 ---
 
 ## 🍺 Install (Homebrew)
