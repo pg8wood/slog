@@ -23,6 +23,10 @@ A tiny CLI that launches your iOS Simulator app and taps through the login scree
 ---
 
 ## 🍺 Install (Homebrew)
+> [!NOTE]
+> You may see errors when using `brew install`, like `Failed to fix install linkage` when homebrew installs the `AXe` dependency. This can safely be ignored. From their [README](https://github.com/cameroncooke/AXe/blob/main/README.md#install-via-homebrew): 
+> > This is because the binaries are already codesigned and Homebrew is attempting to resign them, which is not necessary.
+
 ```bash
 brew install pg8wood/tap/slog
 ```
