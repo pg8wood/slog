@@ -800,6 +800,7 @@ Commands:
                      Interactive: pick device, app, account
   config
                      Print current configuration (JSON)
+  repl                      Interactive REPL for recording and replaying AXe scripts
 
 Options:
   -h, -H, --help    Show this help and exit
@@ -830,6 +831,9 @@ case "$1" in
   switch-app) shift; switch-app "$@" ;;
   switch-account) shift; switch-account "$@" ;;
   config) config ;;
+  repl)
+    exec slog-repl.py
+    ;;
   add)
     shift
     case "$1" in
