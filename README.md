@@ -51,6 +51,9 @@ slog switch <account|app|device>   # explicit
 slog                               # interactive
 slog login                         # explicit
 slog repl                          # open interactive REPL (record/list/run scripts)
+
+# Post-login scripts
+slog repl                          # run, record, and replay AXe commands in your simulator or arbitrary commands
 slog run <script>                  # run previously recorded script non-interactively
 ```
 
