@@ -157,7 +157,7 @@ def main():
                 record_lines = []
                 continue
 
-            # AXe commands: tap/type
+            # AXe commands
             if cmd in AXE_COMMANDS and len(parts) > 1:
                 # Use recording UDID
                 if not record_udid:
@@ -168,8 +168,8 @@ def main():
                 record_lines.append(command_line)
                 subprocess.run(command_line, shell=True)
                 continue
-            else:
-                # If "--udid" not present, append
+            elif cmd == "axe":
+                # Append --udid if the user did not use the AXe shortcuts and the UDID is not present
                 if "--udid" not in parts and record_udid:
                     command_line = line + f" --udid {record_udid}"
                 else:
@@ -177,6 +177,12 @@ def main():
                 print(f"Captured command: {command_line}")
                 record_lines.append(command_line)
                 subprocess.run(command_line, shell=True)
+                continue
+            else:
+                # For all other commands, record as-is
+                print(f"Captured command: {line}")
+                record_lines.append(line)
+                subprocess.run(line, shell=True)
                 continue
 
         # not recording
