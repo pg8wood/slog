@@ -860,7 +860,7 @@ function run-script() {
     echo -e "${C_YELLOW}Warning:${C_RESET} Script was recorded for UDID ${C_CYAN}$SCRIPT_UDID${C_RESET}, but your active device is ${C_CYAN}$UDID${C_RESET}." >&2
     echo -e "${C_DIM}The script will run on its original device. To update, re-record or edit the script.${C_RESET}" >&2
   fi
-  echo "Running script '$SCRIPT_NAME' on active device '$ACTIVE_DEVICE' ($UDID)" >&2
+  echo "Running script '$SCRIPT_NAME'" >&2
   bash "$SCRIPT_PATH"
   return $?
 }
