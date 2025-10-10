@@ -888,10 +888,11 @@ case "$1" in
   switch-app) shift; switch-app "$@" ;;
   switch-account) shift; switch-account "$@" ;;
   config) config ;;
+  run)
+    shift; run-script "$1"; exit $?
+    ;;
   repl)
     exec slog-repl.py
-      shift; run-script "$1"; exit $?
-    exit $?
     ;;
   add)
     shift
