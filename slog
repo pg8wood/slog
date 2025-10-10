@@ -775,6 +775,7 @@ No arguments:
 Commands:
   setup                     Initialize config (v1.0.0), device, app, and account
   login                     Automate login using active app/device/account
+  run SCRIPT                Run a previously recorded REPL script (~/.slog/scripts/SCRIPT.sh) using active device
   add-device                Add a simulator device (UDID only)
   add-app NAME              Add an app and set default coordinates
   add account NAME          Add an account; prompts for credentials
@@ -801,6 +802,7 @@ Commands:
   config
                      Print current configuration (JSON)
   repl                      Interactive REPL for recording and replaying AXe scripts
+  run                       Show usage for run command
 
 Options:
   -h, -H, --help    Show this help and exit
@@ -833,6 +835,55 @@ case "$1" in
   config) config ;;
   repl)
     exec slog-repl.py
+    ;;
+  run)
+    shift
+    SCRIPT_NAME="$1"
+    if [ -z "$SCRIPT_NAME" ]; then
+      echo "Usage: $0 run <script-name>" >&2
+      echo "Scripts are stored in ~/.slog/scripts via 'slog repl' record command." >&2
+      exit 1
+    fi
+    # Ensure config to get active device UDID
+    if [ ! -f "$CONFIG_FILE" ]; then
+      echo "No config found. Run '$0 setup' first." >&2
+      exit 1
+    fi
+    ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+    if [ -z "$ACTIVE_DEVICE" ] || [ "$ACTIVE_DEVICE" = "null" ]; then
+      echo "No activeDevice set in config." >&2
+      exit 1
+    fi
+    UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid // empty" "$CONFIG_FILE")
+    if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+      echo "UDID for active device '$ACTIVE_DEVICE' not found in config." >&2
+      exit 1
+    fi
+    SCRIPTS_DIR="$HOME/.slog/scripts"
+    SCRIPT_PATH="$SCRIPTS_DIR/${SCRIPT_NAME}.sh"
+    if [ ! -f "$SCRIPT_PATH" ]; then
+      echo "Script '$SCRIPT_NAME' not found at $SCRIPT_PATH" >&2
+      echo "Use 'slog repl' then 'record <name>' to create it." >&2
+      exit 1
+    fi
+    # Parse first --udid value from script
+    SCRIPT_UDID=""
+    while IFS= read -r line; do
+      case "$line" in
+        *--udid*)
+          # Extract value after --udid
+          SCRIPT_UDID=$(echo "$line" | awk 'match($0, /--udid[[:space:]]+([^ ]+)/, arr) {print arr[1]}' | head -n1)
+          if [ -n "$SCRIPT_UDID" ]; then break; fi
+          ;;
+      esac
+    done < "$SCRIPT_PATH"
+    if [ -n "$SCRIPT_UDID" ] && [ "$SCRIPT_UDID" != "$UDID" ]; then
+      echo "Warning: Script was recorded for UDID $SCRIPT_UDID, but your active device is $UDID." >&2
+      echo "         The script will run as-is. To update, re-record or edit the script." >&2
+    fi
+    echo "Running script '$SCRIPT_NAME' on active device '$ACTIVE_DEVICE' ($UDID)" >&2
+    bash "$SCRIPT_PATH"
+    exit $?
     ;;
   add)
     shift

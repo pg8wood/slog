@@ -50,6 +50,8 @@ slog switch <account|app|device>   # explicit
 # Login
 slog                               # interactive
 slog login                         # explicit
+slog repl                          # open interactive REPL (record/list/run scripts)
+slog run <script>                  # run previously recorded script non-interactively
 ```
 
 
