@@ -812,6 +812,7 @@ EOF
 function run-script() {
   # Usage: run-script <script-name>
   local SCRIPT_NAME="$1"
+  init_colors
   if [ -z "$SCRIPT_NAME" ]; then
     echo "Usage: $0 run <script-name>" >&2
     echo "Scripts are stored in ~/.slog/scripts via 'slog repl' record command." >&2
@@ -856,8 +857,8 @@ function run-script() {
     [ $FOUND_UDID -eq 1 ] && break
   done < "$SCRIPT_PATH"
   if [ -n "$SCRIPT_UDID" ] && [ "$SCRIPT_UDID" != "$UDID" ]; then
-    echo "Warning: Script was recorded for UDID $SCRIPT_UDID, but your active device is $UDID." >&2
-    echo "         The script will run as-is. To update, re-record or edit the script." >&2
+    echo -e "${C_YELLOW}Warning:${C_RESET} Script was recorded for UDID ${C_CYAN}$SCRIPT_UDID${C_RESET}, but your active device is ${C_CYAN}$UDID${C_RESET}." >&2
+    echo -e "${C_DIM}The script will run on its original device. To update, re-record or edit the script.${C_RESET}" >&2
   fi
   echo "Running script '$SCRIPT_NAME' on active device '$ACTIVE_DEVICE' ($UDID)" >&2
   bash "$SCRIPT_PATH"
