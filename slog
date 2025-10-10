@@ -809,6 +809,61 @@ Options:
 EOF
 }
 
+function run-script() {
+  # Usage: run-script <script-name>
+  local SCRIPT_NAME="$1"
+  if [ -z "$SCRIPT_NAME" ]; then
+    echo "Usage: $0 run <script-name>" >&2
+    echo "Scripts are stored in ~/.slog/scripts via 'slog repl' record command." >&2
+    return 1
+  fi
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first." >&2
+    return 1
+  fi
+  local ACTIVE_DEVICE UDID SCRIPTS_DIR SCRIPT_PATH SCRIPT_UDID FOUND_UDID
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  if [ -z "$ACTIVE_DEVICE" ] || [ "$ACTIVE_DEVICE" = "null" ]; then
+    echo "No activeDevice set in config." >&2
+    return 1
+  fi
+  UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid // empty" "$CONFIG_FILE")
+  if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+    echo "UDID for active device '$ACTIVE_DEVICE' not found in config." >&2
+    return 1
+  fi
+  SCRIPTS_DIR="$HOME/.slog/scripts"
+  SCRIPT_PATH="$SCRIPTS_DIR/${SCRIPT_NAME}.sh"
+  if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "Script '$SCRIPT_NAME' not found at $SCRIPT_PATH" >&2
+    echo "Use 'slog repl' then 'record <name>' to create it." >&2
+    return 1
+  fi
+  SCRIPT_UDID=""; FOUND_UDID=0
+  while IFS= read -r line; do
+    case "$line" in '#'*) continue ;; esac
+    set -- $line
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--udid" ]; then
+        shift
+        if [ -n "$1" ]; then SCRIPT_UDID="$1"; FOUND_UDID=1; fi
+        break
+      elif [[ "$1" == --udid=* ]]; then
+        SCRIPT_UDID="${1#--udid=}"; FOUND_UDID=1; break
+      fi
+      shift
+    done
+    [ $FOUND_UDID -eq 1 ] && break
+  done < "$SCRIPT_PATH"
+  if [ -n "$SCRIPT_UDID" ] && [ "$SCRIPT_UDID" != "$UDID" ]; then
+    echo "Warning: Script was recorded for UDID $SCRIPT_UDID, but your active device is $UDID." >&2
+    echo "         The script will run as-is. To update, re-record or edit the script." >&2
+  fi
+  echo "Running script '$SCRIPT_NAME' on active device '$ACTIVE_DEVICE' ($UDID)" >&2
+  bash "$SCRIPT_PATH"
+  return $?
+}
+
 case "$1" in
   "")
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -835,54 +890,7 @@ case "$1" in
   config) config ;;
   repl)
     exec slog-repl.py
-    ;;
-  run)
-    shift
-    SCRIPT_NAME="$1"
-    if [ -z "$SCRIPT_NAME" ]; then
-      echo "Usage: $0 run <script-name>" >&2
-      echo "Scripts are stored in ~/.slog/scripts via 'slog repl' record command." >&2
-      exit 1
-    fi
-    # Ensure config to get active device UDID
-    if [ ! -f "$CONFIG_FILE" ]; then
-      echo "No config found. Run '$0 setup' first." >&2
-      exit 1
-    fi
-    ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
-    if [ -z "$ACTIVE_DEVICE" ] || [ "$ACTIVE_DEVICE" = "null" ]; then
-      echo "No activeDevice set in config." >&2
-      exit 1
-    fi
-    UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid // empty" "$CONFIG_FILE")
-    if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
-      echo "UDID for active device '$ACTIVE_DEVICE' not found in config." >&2
-      exit 1
-    fi
-    SCRIPTS_DIR="$HOME/.slog/scripts"
-    SCRIPT_PATH="$SCRIPTS_DIR/${SCRIPT_NAME}.sh"
-    if [ ! -f "$SCRIPT_PATH" ]; then
-      echo "Script '$SCRIPT_NAME' not found at $SCRIPT_PATH" >&2
-      echo "Use 'slog repl' then 'record <name>' to create it." >&2
-      exit 1
-    fi
-    # Parse first --udid value from script
-    SCRIPT_UDID=""
-    while IFS= read -r line; do
-      case "$line" in
-        *--udid*)
-          # Extract value after --udid
-          SCRIPT_UDID=$(echo "$line" | awk 'match($0, /--udid[[:space:]]+([^ ]+)/, arr) {print arr[1]}' | head -n1)
-          if [ -n "$SCRIPT_UDID" ]; then break; fi
-          ;;
-      esac
-    done < "$SCRIPT_PATH"
-    if [ -n "$SCRIPT_UDID" ] && [ "$SCRIPT_UDID" != "$UDID" ]; then
-      echo "Warning: Script was recorded for UDID $SCRIPT_UDID, but your active device is $UDID." >&2
-      echo "         The script will run as-is. To update, re-record or edit the script." >&2
-    fi
-    echo "Running script '$SCRIPT_NAME' on active device '$ACTIVE_DEVICE' ($UDID)" >&2
-    bash "$SCRIPT_PATH"
+      shift; run-script "$1"; exit $?
     exit $?
     ;;
   add)
