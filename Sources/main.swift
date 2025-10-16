@@ -106,21 +106,28 @@ func alignTerminal(under simulator: Window, terminal: Window, margin: CGFloat) {
 	let simulatorFrame = simulator.frame.value
 	let terminalFrame = terminal.frame.value
 
+	// Match terminal width to simulator's width; cap terminal height to 250.
+	let newTerminalSize = CGSize(
+		width: simulatorFrame.size.width,
+		height: min(terminalFrame.size.height, 250)
+	)
+
 	let desiredOrigin = CGPoint(
 		x: simulatorFrame.origin.x,
-		y: simulatorFrame.origin.y - terminalFrame.height - margin
+		y: simulatorFrame.origin.y - newTerminalSize.height - margin
 	)
 
 	let screen = screenForFrame(simulatorFrame) ?? NSScreen.main
 	let clampedOrigin: CGPoint
 	if let screen {
-		clampedOrigin = clampPointWithinScreen(frame: terminalFrame, desiredOrigin: desiredOrigin, screen: screen)
+		let targetFrameForClamp = CGRect(origin: .zero, size: newTerminalSize)
+		clampedOrigin = clampPointWithinScreen(frame: targetFrameForClamp, desiredOrigin: desiredOrigin, screen: screen)
 	} else {
 		clampedOrigin = desiredOrigin
 	}
 
-	Logger.debug("Aligning terminal to x=\(clampedOrigin.x), y=\(clampedOrigin.y) below simulator frame=\(NSStringFromRect(simulatorFrame))")
-	_ = terminal.frame.set(CGRect(origin: clampedOrigin, size: terminalFrame.size))
+	Logger.debug("Aligning terminal to x=\(clampedOrigin.x), y=\(clampedOrigin.y), size=\(NSStringFromSize(newTerminalSize)) below simulator frame=\(NSStringFromRect(simulatorFrame))")
+	_ = terminal.frame.set(CGRect(origin: clampedOrigin, size: newTerminalSize))
 }
 
 // MARK: - Event wiring
