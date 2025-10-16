@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:slog}",
+            "name": "Debug aligner",
+            "program": "${workspaceFolder:slog}/.build/debug/aligner",
+            "preLaunchTask": "swift: Build Debug aligner"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:slog}",
+            "name": "Release aligner",
+            "program": "${workspaceFolder:slog}/.build/release/aligner",
+            "preLaunchTask": "swift: Build Release aligner"
+        }
+    ]
+}
