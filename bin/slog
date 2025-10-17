@@ -94,6 +94,23 @@ function launch_aligner() {
   echo "Warning: slog-aligner not found at $BIN; skipping window alignment." >&2
 }
 
+function stop_aligner() {
+  local killed=0
+  echo "Stopping slog-aligner..." >&2
+  if killall slog-aligner 2>/dev/null; then
+    killed=1
+  fi
+  sleep 0.2
+  if killall -9 slog-aligner 2>/dev/null; then
+    killed=1
+  fi
+  if [ "$killed" -eq 1 ]; then
+    echo "slog-aligner stopped." >&2
+  else
+    echo "No slog-aligner process found." >&2
+  fi
+}
+
 
 function print_banner() {
   printf "%b" "${C_GREEN}"
@@ -808,6 +825,7 @@ No arguments:
 Commands:
   setup                     Initialize config (v1.0.0), device, app, and account
   login                     Automate login using active app/device/account
+  stop                      Stop/kill the background window aligner
   run SCRIPT                Run a previously recorded REPL script (~/.slog/scripts/SCRIPT.sh) using active device
   add-device                Add a simulator device (UDID only)
   add-app NAME              Add an app and set default coordinates
@@ -928,6 +946,9 @@ case "$1" in
     ;;
   repl)
     exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/slog-repl"
+    ;;
+  stop)
+    stop_aligner
     ;;
   add)
     shift
