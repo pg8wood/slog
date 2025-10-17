@@ -76,9 +76,6 @@ function launch_aligner() {
     fi
   fi
 
-  local LOG_DIR="$HOME/Library/Logs"
-  mkdir -p "$LOG_DIR"
-  local LOG_FILE="$LOG_DIR/slog-aligner.log"
 
   local SCRIPT_DIR
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,8 +83,8 @@ function launch_aligner() {
 
   if [ -x "$BIN" ]; then
     echo "Launching terminal window aligner..." >&2
-    echo "==== $(date) launching $BIN" >>"$LOG_FILE"
-    nohup "$BIN" >>"$LOG_FILE" 2>&1 &
+    echo "This will take a few seconds to complete..." >&2
+    nohup "$BIN" >/dev/null 2>&1 &
     return
   fi
 
