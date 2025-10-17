@@ -44,8 +44,7 @@ func ensureAccessibilityPermission(prompt: Bool) -> Bool {
 private let simulatorBundleId = "com.apple.iphonesimulator"
 private let terminalBundleIds: Set<String> = [
 	"com.apple.Terminal",
-	"com.googlecode.iterm2",
-	"io.alacritty"
+	"com.googlecode.iterm2"
 ]
 
 func clampPointWithinScreen(frame: CGRect, desiredOrigin: CGPoint, screen: NSScreen) -> CGPoint {
@@ -138,6 +137,7 @@ final class AlignmentController {
 	private var terminalWindow: Window?
 	private let margin: CGFloat
 	private var activationObserver: Any?
+	private var lastSimulatorActivationAt: Date?
 
 
 	init(state: Swindler.State, margin: CGFloat) {
@@ -197,17 +197,25 @@ final class AlignmentController {
 			guard let self else { return }
 			guard let app = notif.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
 			if app.bundleIdentifier == simulatorBundleId {
-				// Simulator activated; make sure we have current windows then raise terminal on top.
+				// Debounce: if we just handled activation very recently, skip
+				let now = Date()
+				if let last = self.lastSimulatorActivationAt, now.timeIntervalSince(last) < 0.10 {
+					Logger.debug("Debounced simulator activation (<10ms)")
+					return
+				}
+				self.lastSimulatorActivationAt = now
+
+				// Refresh selection, then briefly activate terminal and immediately reactivate Simulator
 				self.refreshWindows(reason: "simulator activated")
-				if let term = self.terminalWindow {
-					Logger.debug("Simulator activated; attempting to bring terminal frontmost")
-					// Bring the terminal app to front without stealing focus from fields (best-effort)
-					NSRunningApplication(processIdentifier: term.application.processIdentifier)?.activate(options: [.activateIgnoringOtherApps])
+				if let term = self.terminalWindow,
+					let termApp = NSRunningApplication(processIdentifier: term.application.processIdentifier) {
+					Logger.debug("Activating terminal, then Simulator (debounced)")
+					termApp.activate(options: [.activateIgnoringOtherApps])
+					app.activate(options: [.activateIgnoringOtherApps])
 				}
 			}
 		}
 	}
-
 
 	private func align(sim: Window, term: Window) {
 		alignTerminal(under: sim, terminal: term, margin: margin)
