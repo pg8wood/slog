@@ -62,6 +62,39 @@ function ensure_dependencies_installed() {
 }
 
 
+function launch_aligner() {
+  # Skip if disabled by env
+  if [ -n "$SLOG_NO_ALIGNER" ]; then
+    return
+  fi
+
+  # Avoid duplicate instances if possible
+  if command -v pgrep >/dev/null 2>&1; then
+    if pgrep -x slog-aligner >/dev/null 2>&1; then
+      echo "slog: aligner already running (pgrep matched); skipping." >&2
+      return
+    fi
+  fi
+
+  local LOG_DIR="$HOME/Library/Logs"
+  mkdir -p "$LOG_DIR"
+  local LOG_FILE="$LOG_DIR/slog-aligner.log"
+
+  local SCRIPT_DIR
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local BIN="$SCRIPT_DIR/slog-aligner"
+
+  if [ -x "$BIN" ]; then
+    echo "Launching terminal window aligner..." >&2
+    echo "==== $(date) launching $BIN -d" >>"$LOG_FILE"
+    nohup "$BIN" -d >>"$LOG_FILE" 2>&1 &
+    return
+  fi
+
+  echo "Warning: slog-aligner not found at $BIN; skipping window alignment." >&2
+}
+
+
 function print_banner() {
   printf "%b" "${C_GREEN}"
   cat <<ASCII
@@ -770,7 +803,7 @@ Usage: $0 [command]
 
 No arguments:
   - If no config at $CONFIG_FILE: runs 'setup'
-  - If config exists: runs 'login'
+  - If config exists: launches window aligner, then runs 'login'
 
 Commands:
   setup                     Initialize config (v1.0.0), device, app, and account
@@ -870,6 +903,7 @@ case "$1" in
     if [ ! -f "$CONFIG_FILE" ]; then
       setup
     else
+      launch_aligner
       login
     fi
     ;;
@@ -893,7 +927,7 @@ case "$1" in
     shift; run-script "$1"; exit $?
     ;;
   repl)
-    exec slog-repl.py
+    exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/slog-repl"
     ;;
   add)
     shift
