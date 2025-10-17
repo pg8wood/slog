@@ -119,19 +119,27 @@ function setup() {
     exit 1
   fi
 
+  # Enrich simulator list with iOS versions
+  IFS=$'\n' read -rd '' -a SIM_ARRAY_RAW <<<"$SIMS"
+  SIM_ARRAY=()
+  for entry in "${SIM_ARRAY_RAW[@]}"; do
+    UDID=$(echo "$entry" | awk -F'|' '{print $1}' | xargs)
+    NAME=$(echo "$entry" | awk -F'|' '{print $2}' | xargs)
+    IOS_VERSION=$(get_ios_version "$UDID")
+    if [ -n "$IOS_VERSION" ]; then
+      SIM_ARRAY+=("$UDID | $NAME - $IOS_VERSION")
+    else
+      SIM_ARRAY+=("$entry")
+    fi
+  done
+
   printf "%b\n" "${C_BOLD}Select a booted simulator to set as active device:${C_RESET}"
-  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
   select CHOICE in "${SIM_ARRAY[@]}"; do
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       DEVICE_NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      IOS_VERSION=$(get_ios_version "$UDID")
-      if [ -n "$IOS_VERSION" ]; then
-        DISPLAY_NAME="$DEVICE_NAME - $IOS_VERSION"
-      else
-        DISPLAY_NAME="$DEVICE_NAME"
-      fi
-      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DISPLAY_NAME ${C_DIM}($UDID)${C_RESET}"
+      # DEVICE_NAME already includes iOS version from the enriched list
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DEVICE_NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
       printf "%b\n" "${C_YELLOW}Invalid choice${C_RESET}"
@@ -309,20 +317,27 @@ function add-device() {
     exit 1
   fi
 
-  printf "%b\n" "${C_BOLD}Select a booted simulator:${C_RESET}"
-  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
+  # Enrich simulator list with iOS versions
+  IFS=$'\n' read -rd '' -a SIM_ARRAY_RAW <<<"$SIMS"
+  SIM_ARRAY=()
+  for entry in "${SIM_ARRAY_RAW[@]}"; do
+    UDID=$(echo "$entry" | awk -F'|' '{print $1}' | xargs)
+    NAME=$(echo "$entry" | awk -F'|' '{print $2}' | xargs)
+    IOS_VERSION=$(get_ios_version "$UDID")
+    if [ -n "$IOS_VERSION" ]; then
+      SIM_ARRAY+=("$UDID | $NAME - $IOS_VERSION")
+    else
+      SIM_ARRAY+=("$entry")
+    fi
+  done
 
+  printf "%b\n" "${C_BOLD}Select a booted simulator:${C_RESET}"
   select CHOICE in "${SIM_ARRAY[@]}"; do
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      IOS_VERSION=$(get_ios_version "$UDID")
-      if [ -n "$IOS_VERSION" ]; then
-        DISPLAY_NAME="$NAME - $IOS_VERSION"
-      else
-        DISPLAY_NAME="$NAME"
-      fi
-      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DISPLAY_NAME ${C_DIM}($UDID)${C_RESET}"
+      # NAME already includes iOS version from the enriched list
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
       echo "Invalid choice"
@@ -331,7 +346,7 @@ function add-device() {
 
   jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-  printf "%b\n" "${C_GREEN}Added device${C_RESET} $DISPLAY_NAME"
+  printf "%b\n" "${C_GREEN}Added device${C_RESET} $NAME"
 
   # Offer to add per-app overrides now
   APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
