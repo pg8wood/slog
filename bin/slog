@@ -825,6 +825,7 @@ No arguments:
 Commands:
   setup                     Initialize config (v1.0.0), device, app, and account
   login                     Automate login using active app/device/account
+  follow                    Launch the window aligner (background)
   stop                      Stop/kill the background window aligner
   run SCRIPT                Run a previously recorded REPL script (~/.slog/scripts/SCRIPT.sh) using active device
   add-device                Add a simulator device (UDID only)
@@ -857,6 +858,7 @@ Commands:
 
 Options:
   -h, -H, --help    Show this help and exit
+  --no-follow       Prevent slog from following the active simulator window
 EOF
 }
 
@@ -916,6 +918,11 @@ function run-script() {
   return $?
 }
 
+if [ "${1-}" = "--no-follow" ]; then
+  export SLOG_NO_ALIGNER=1
+  shift
+fi
+
 case "$1" in
   "")
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -946,6 +953,9 @@ case "$1" in
     ;;
   repl)
     exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/slog-repl"
+    ;;
+  follow)
+    launch_aligner
     ;;
   stop)
     stop_aligner
