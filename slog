@@ -169,7 +169,7 @@ function setup() {
 {
   "version": "$SLOG_VERSION",
   "devices": {
-    "$DEVICE_NAME": { "udid": "$UDID", "iosVersion": "$IOS_VERSION" }
+    "$DEVICE_NAME": { "udid": "$UDID" }
   },
   "apps": {
     "$APP_NAME": {
@@ -221,11 +221,7 @@ function login() {
   POST_LAUNCH_DELAY_MS=$(jq -r ".apps[\"$ACTIVE_APP\"].timing.postLaunchDelayMs // 1200" "$CONFIG_FILE")
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
-  IOS_VERSION=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].iosVersion // empty" "$CONFIG_FILE")
-  # Fallback to fetching iOS version if not in config (backward compatibility)
-  if [ -z "$IOS_VERSION" ] || [ "$IOS_VERSION" = "null" ]; then
-    IOS_VERSION=$(get_ios_version "$UDID")
-  fi
+  IOS_VERSION=$(get_ios_version "$UDID")
   EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
   EMAIL_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.y // .apps[\"$ACTIVE_APP\"].coordinates.default.email.y" "$CONFIG_FILE")
   PASS_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.x // .apps[\"$ACTIVE_APP\"].coordinates.default.password.x" "$CONFIG_FILE")
@@ -333,7 +329,7 @@ function add-device() {
     fi
   done
 
-  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\", \"iosVersion\": \"$IOS_VERSION\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
   printf "%b\n" "${C_GREEN}Added device${C_RESET} $DISPLAY_NAME"
 
@@ -718,10 +714,7 @@ function switch-all() {
 
   # Decorated summary
   CHOSEN_UDID=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].udid" "$CONFIG_FILE")
-  CHOSEN_IOS_VERSION=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].iosVersion // empty" "$CONFIG_FILE")
-  if [ -z "$CHOSEN_IOS_VERSION" ] || [ "$CHOSEN_IOS_VERSION" = "null" ]; then
-    CHOSEN_IOS_VERSION=$(get_ios_version "$CHOSEN_UDID")
-  fi
+  CHOSEN_IOS_VERSION=$(get_ios_version "$CHOSEN_UDID")
   SEL_USERNAME=$(jq -r ".accounts[\"$CHOSEN_ACCOUNT\"].username" "$CONFIG_FILE")
   if [ -n "$CHOSEN_IOS_VERSION" ]; then
     CHOSEN_DEVICE_DISPLAY="$CHOSEN_DEVICE - $CHOSEN_IOS_VERSION"
