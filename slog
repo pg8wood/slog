@@ -96,6 +96,17 @@ ASCII
   printf "%b\n\n" "${C_RESET}"
 }
 
+function get_ios_version() {
+  # Usage: get_ios_version <UDID>
+  # Returns iOS version string like "iOS 18.2" or empty if not found
+  local UDID="$1"
+  local RUNTIME=$(xcrun simctl list devices --json | jq -r ".devices | to_entries[] | select(.value[] | .udid == \"$UDID\") | .key" 2>/dev/null | head -1)
+  if [ -n "$RUNTIME" ]; then
+    # Parse runtime like "com.apple.CoreSimulator.SimRuntime.iOS-17-2" to "iOS 17.2"
+    echo "$RUNTIME" | sed -n 's/.*iOS-\([0-9]*\)-\([0-9]*\).*/iOS \1.\2/p'
+  fi
+}
+
 function setup() {
   ensure_dependencies_installed
   init_colors
@@ -114,7 +125,13 @@ function setup() {
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       DEVICE_NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DEVICE_NAME ${C_DIM}($UDID)${C_RESET}"
+      IOS_VERSION=$(get_ios_version "$UDID")
+      if [ -n "$IOS_VERSION" ]; then
+        DISPLAY_NAME="$DEVICE_NAME - $IOS_VERSION"
+      else
+        DISPLAY_NAME="$DEVICE_NAME"
+      fi
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DISPLAY_NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
       printf "%b\n" "${C_YELLOW}Invalid choice${C_RESET}"
@@ -152,7 +169,7 @@ function setup() {
 {
   "version": "$SLOG_VERSION",
   "devices": {
-    "$DEVICE_NAME": { "udid": "$UDID" }
+    "$DEVICE_NAME": { "udid": "$UDID", "iosVersion": "$IOS_VERSION" }
   },
   "apps": {
     "$APP_NAME": {
@@ -204,6 +221,11 @@ function login() {
   POST_LAUNCH_DELAY_MS=$(jq -r ".apps[\"$ACTIVE_APP\"].timing.postLaunchDelayMs // 1200" "$CONFIG_FILE")
 
   UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
+  IOS_VERSION=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].iosVersion // empty" "$CONFIG_FILE")
+  # Fallback to fetching iOS version if not in config (backward compatibility)
+  if [ -z "$IOS_VERSION" ] || [ "$IOS_VERSION" = "null" ]; then
+    IOS_VERSION=$(get_ios_version "$UDID")
+  fi
   EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
   EMAIL_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.y // .apps[\"$ACTIVE_APP\"].coordinates.default.email.y" "$CONFIG_FILE")
   PASS_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.x // .apps[\"$ACTIVE_APP\"].coordinates.default.password.x" "$CONFIG_FILE")
@@ -220,7 +242,12 @@ function login() {
     exit 1
   fi
 
-  printf "%b\n" "Using device: ${C_CYAN}$ACTIVE_DEVICE${C_RESET} ${C_DIM}($UDID)${C_RESET}"
+  if [ -n "$IOS_VERSION" ]; then
+    DEVICE_DISPLAY="$ACTIVE_DEVICE - $IOS_VERSION"
+  else
+    DEVICE_DISPLAY="$ACTIVE_DEVICE"
+  fi
+  printf "%b\n" "Using device: ${C_CYAN}$DEVICE_DISPLAY${C_RESET} ${C_DIM}($UDID)${C_RESET}"
   printf "%b\n" "Using app:    ${C_CYAN}$ACTIVE_APP${C_RESET}"
   printf "%b\n" "Using account:${C_CYAN}$ACTIVE_ACCOUNT${C_RESET} ${C_DIM}($USERNAME)${C_RESET}"
 
@@ -293,16 +320,22 @@ function add-device() {
     if [ -n "$CHOICE" ]; then
       UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
       NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
-      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $NAME ${C_DIM}($UDID)${C_RESET}"
+      IOS_VERSION=$(get_ios_version "$UDID")
+      if [ -n "$IOS_VERSION" ]; then
+        DISPLAY_NAME="$NAME - $IOS_VERSION"
+      else
+        DISPLAY_NAME="$NAME"
+      fi
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DISPLAY_NAME ${C_DIM}($UDID)${C_RESET}"
       break
     else
       echo "Invalid choice"
     fi
   done
 
-  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\", \"iosVersion\": \"$IOS_VERSION\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-  printf "%b\n" "${C_GREEN}Added device${C_RESET} $NAME"
+  printf "%b\n" "${C_GREEN}Added device${C_RESET} $DISPLAY_NAME"
 
   # Offer to add per-app overrides now
   APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
@@ -685,10 +718,19 @@ function switch-all() {
 
   # Decorated summary
   CHOSEN_UDID=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].udid" "$CONFIG_FILE")
+  CHOSEN_IOS_VERSION=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].iosVersion // empty" "$CONFIG_FILE")
+  if [ -z "$CHOSEN_IOS_VERSION" ] || [ "$CHOSEN_IOS_VERSION" = "null" ]; then
+    CHOSEN_IOS_VERSION=$(get_ios_version "$CHOSEN_UDID")
+  fi
   SEL_USERNAME=$(jq -r ".accounts[\"$CHOSEN_ACCOUNT\"].username" "$CONFIG_FILE")
+  if [ -n "$CHOSEN_IOS_VERSION" ]; then
+    CHOSEN_DEVICE_DISPLAY="$CHOSEN_DEVICE - $CHOSEN_IOS_VERSION"
+  else
+    CHOSEN_DEVICE_DISPLAY="$CHOSEN_DEVICE"
+  fi
   printf "\n%b%s%b switched to:\n" "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
   printf "  App:       %b%s%b\n" "${C_CYAN}${C_BOLD}" "$CHOSEN_APP" "${C_RESET}"
-  printf "  Simulator: %b%s%b %b(%s)%b\n" "${C_BLUE}${C_BOLD}" "$CHOSEN_DEVICE" "${C_RESET}" "${C_DIM}" "$CHOSEN_UDID" "${C_RESET}"
+  printf "  Simulator: %b%s%b %b(%s)%b\n" "${C_BLUE}${C_BOLD}" "$CHOSEN_DEVICE_DISPLAY" "${C_RESET}" "${C_DIM}" "$CHOSEN_UDID" "${C_RESET}"
   printf "  Account:   %b%s%b %b(%s)%b\n" "${C_YELLOW}${C_BOLD}" "$CHOSEN_ACCOUNT" "${C_RESET}" "${C_DIM}" "$SEL_USERNAME" "${C_RESET}"
   printf "\nRun %b%s%b to log in." "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
 }
