@@ -86,8 +86,8 @@ function launch_aligner() {
 
   if [ -x "$BIN" ]; then
     echo "Launching terminal window aligner..." >&2
-    echo "==== $(date) launching $BIN -d" >>"$LOG_FILE"
-    nohup "$BIN" -d >>"$LOG_FILE" 2>&1 &
+    echo "==== $(date) launching $BIN" >>"$LOG_FILE"
+    nohup "$BIN" >>"$LOG_FILE" 2>&1 &
     return
   fi
 
