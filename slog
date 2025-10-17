@@ -1,0 +1,965 @@
+#!/usr/bin/env bash
+CONFIG_FILE="$HOME/.slog.json"
+SLOG_VERSION="1.0.0"
+
+function init_colors() {
+  if [ -n "$NO_COLOR" ] || [ ! -t 1 ]; then
+    C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_CYAN="";
+  else
+    C_RESET='\033[0m'
+    C_BOLD='\033[1m'
+    C_DIM='\033[2m'
+    C_RED='\033[31m'
+    C_GREEN='\033[32m'
+    C_YELLOW='\033[33m'
+    C_BLUE='\033[34m'
+    C_CYAN='\033[36m'
+  fi
+}
+
+function prompt_xy() {
+  # Usage: prompt_xy <label> [suffix] [example]
+  # Sets globals: X_OUT, Y_OUT
+  init_colors
+  local label="$1"
+  local suffix="$2"
+  local example="$3"
+  local line
+  while true; do
+    if [ -n "$example" ]; then
+      printf "Enter X Y for %b%s%b %s %b(e.g., %s)%b\n" "${C_BOLD}" "$label" "${C_RESET}" "$suffix" "${C_DIM}" "$example" "${C_RESET}"
+    else
+      printf "Enter X Y for %b%s%b %s\n" "${C_BOLD}" "$label" "${C_RESET}" "$suffix"
+    fi
+    read -r line
+    # trim
+    line="${line#${line%%[!$' \t']*}}"; line="${line%${line##*[!$' \t']}}"
+    if [[ "$line" =~ ^[0-9]+([.][0-9]+)?[[:space:]]+[0-9]+([.][0-9]+)?$ ]]; then
+      X_OUT=$(awk '{print $1}' <<<"$line")
+      Y_OUT=$(awk '{print $2}' <<<"$line")
+      break
+    else
+      printf "%bInvalid input.%b Please enter two numbers like '100 300'.\n" "${C_RED}" "${C_RESET}"
+    fi
+  done
+}
+
+function ensure_dependencies_installed() {
+  MISSING=0
+  if ! command -v axe &> /dev/null; then
+    echo "Error: 'axe' not found. Install via Homebrew:"
+    echo "  brew tap cameroncooke/formulae && brew install axe"
+    MISSING=1
+  fi
+  if ! command -v jq &> /dev/null; then
+    echo "Error: 'jq' not found. Install via Homebrew:"
+    echo "  brew install jq"
+    MISSING=1
+  fi
+  if [ "$MISSING" -eq 1 ]; then
+    exit 1
+  fi
+}
+
+
+function launch_aligner() {
+  # Skip if disabled by env
+  if [ -n "$SLOG_NO_ALIGNER" ]; then
+    return
+  fi
+
+  # Avoid duplicate instances if possible
+  if command -v pgrep >/dev/null 2>&1; then
+    if pgrep -x slog-aligner >/dev/null 2>&1; then
+      echo "slog: aligner already running (pgrep matched); skipping." >&2
+      return
+    fi
+  fi
+
+  local LOG_DIR="$HOME/Library/Logs"
+  mkdir -p "$LOG_DIR"
+  local LOG_FILE="$LOG_DIR/slog-aligner.log"
+
+  local SCRIPT_DIR
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local BIN="$SCRIPT_DIR/bin/slog-aligner"
+
+  if [ -x "$BIN" ]; then
+    echo "Launching terminal window aligner..." >&2
+    echo "==== $(date) launching $BIN -d" >>"$LOG_FILE"
+    nohup "$BIN" -d >>"$LOG_FILE" 2>&1 &
+    return
+  fi
+
+  echo "Warning: slog-aligner not found at $BIN; skipping window alignment." >&2
+}
+
+
+function print_banner() {
+  printf "%b" "${C_GREEN}"
+  cat <<ASCII
+          _____                    _____           _______                   _____          
+         /\    \                  /\    \         /::\    \                 /\    \         
+        /::\    \                /::\____\       /::::\    \               /::\    \        
+       /::::\    \              /:::/    /      /::::::\    \             /::::\    \       
+      /::::::\    \            /:::/    /      /::::::::\    \           /::::::\    \      
+     /:::/\:::\    \          /:::/    /      /:::/~~\:::\    \         /:::/\:::\    \     
+    /:::/__\:::\    \        /:::/    /      /:::/    \:::\    \       /:::/  \:::\    \    
+    \:::\   \:::\    \      /:::/    /      /:::/    / \:::\    \     /:::/    \:::\    \   
+  ___\:::\   \:::\    \    /:::/    /      /:::/____/   \:::\____\   /:::/    / \:::\    \  
+ /\   \:::\   \:::\    \  /:::/    /      |:::|    |     |:::|    | /:::/    /   \:::\ ___\ 
+/::\   \:::\   \:::\____\/:::/____/       |:::|____|     |:::|    |/:::/____/  ___\:::|    |
+\:::\   \:::\   \::/    /\:::\    \        \:::\    \   /:::/    / \:::\    \ /\  /:::|____|
+ \:::\   \:::\   \/____/  \:::\    \        \:::\    \ /:::/    /   \:::\    /::\ \::/    / 
+  \:::\   \:::\    \       \:::\    \        \:::\    /:::/    /     \:::\   \:::\ \/____/  
+   \:::\   \:::\____\       \:::\    \        \:::\__/:::/    /       \:::\   \:::\____\    
+    \:::\  /:::/    /        \:::\    \        \::::::::/    /         \:::\  /:::/    /    
+     \:::\/:::/    /          \:::\    \        \::::::/    /           \:::\/:::/    /     
+      \::::::/    /            \:::\    \        \::::/    /             \::::::/    /      
+       \::::/    /              \:::\____\        \::/____/               \::::/    /       
+        \::/    /                \::/    /         ~~                      \::/____/        
+         \/____/                  \/____/                                                   
+
+
+
+                                      
+                                                                                            
+                    slog v$SLOG_VERSION. Simulator logins shouldn't be a slog.                                                                           
+ASCII
+  printf "%b\n\n" "${C_RESET}"
+}
+
+function setup() {
+  ensure_dependencies_installed
+  init_colors
+  print_banner
+  
+  printf "%b\n" "${C_BLUE}Fetching available simulators (booted only)...${C_RESET}"
+  SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+  if [ -z "$SIMS" ]; then
+    printf "%b\n" "${C_RED}No booted simulators found! Please boot a simulator and rerun setup.${C_RESET}"
+    exit 1
+  fi
+
+  printf "%b\n" "${C_BOLD}Select a booted simulator to set as active device:${C_RESET}"
+  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
+  select CHOICE in "${SIM_ARRAY[@]}"; do
+    if [ -n "$CHOICE" ]; then
+      UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
+      DEVICE_NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $DEVICE_NAME ${C_DIM}($UDID)${C_RESET}"
+      break
+    else
+      printf "%b\n" "${C_YELLOW}Invalid choice${C_RESET}"
+    fi
+  done
+
+  printf "%b" "${C_BOLD}Enter an app name to configure${C_RESET} (e.g., slog): "
+  read APP_NAME
+
+  printf "%b" "Enter bundle ID for ${C_CYAN}$APP_NAME${C_RESET} (e.g., com.patrickgatewood.slog): "
+  read BUNDLE_ID
+
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
+
+  printf "%b" "Extra wait after launch (ms) ${C_DIM}[default: 1000]${C_RESET}: "
+  read WAIT_MS
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=1000; fi
+
+  printf "%b\n" "${C_BOLD}Enter default coordinates for ${C_CYAN}$APP_NAME${C_RESET}:${C_RESET}"
+  prompt_xy "email" "field" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
+
+  printf "%b" "Enter username: "
+  read USERNAME
+  printf "%b" "Enter password: "
+  read -s PASSWORD
+  echo
+
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "version": "$SLOG_VERSION",
+  "devices": {
+    "$DEVICE_NAME": { "udid": "$UDID" }
+  },
+  "apps": {
+    "$APP_NAME": {
+      "bundleId": "$BUNDLE_ID",
+      "coordinates": {
+        "default": {
+          "email": { "x": $EX, "y": $EY },
+          "password": { "x": $PX, "y": $PY },
+          "login": { "x": $LX, "y": $LY }
+        }
+      },
+      "orientation": { "default": "$ORI" }
+      ,
+      "timing": { "postLaunchDelayMs": $WAIT_MS }
+    }
+  },
+  "accounts": {
+    "default": {
+      "username": "$USERNAME",
+      "password": "$PASSWORD"
+    }
+  },
+  "activeDevice": "$DEVICE_NAME",
+  "activeApp": "$APP_NAME",
+  "activeAccount": "default"
+}
+EOF
+
+  printf "%b\n" "Config saved to ${C_DIM}$CONFIG_FILE${C_RESET}"
+  printf "\nRun %b%s%b to log in." "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
+}
+
+function login() {
+  ensure_dependencies_installed
+  init_colors
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    printf "%b\n" "${C_RED}No config found.${C_RESET} Run '${C_BOLD}$0 setup${C_RESET}' first."
+    exit 1
+  fi
+
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  ACTIVE_APP=$(jq -r '.activeApp' "$CONFIG_FILE")
+  APP_ACCOUNT=$(jq -r ".apps[\"$ACTIVE_APP\"].activeAccount // empty" "$CONFIG_FILE")
+  GLOBAL_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+  ACTIVE_ACCOUNT=${APP_ACCOUNT:-$GLOBAL_ACCOUNT}
+  BUNDLE_ID=$(jq -r ".apps[\"$ACTIVE_APP\"].bundleId // empty" "$CONFIG_FILE")
+  ORIENTATION=$(jq -r ".apps[\"$ACTIVE_APP\"].orientation[\"$ACTIVE_DEVICE\"] // .apps[\"$ACTIVE_APP\"].orientation.default // empty" "$CONFIG_FILE")
+  POST_LAUNCH_DELAY_MS=$(jq -r ".apps[\"$ACTIVE_APP\"].timing.postLaunchDelayMs // 1200" "$CONFIG_FILE")
+
+  UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid" "$CONFIG_FILE")
+  EMAIL_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.x // .apps[\"$ACTIVE_APP\"].coordinates.default.email.x" "$CONFIG_FILE")
+  EMAIL_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].email.y // .apps[\"$ACTIVE_APP\"].coordinates.default.email.y" "$CONFIG_FILE")
+  PASS_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.x // .apps[\"$ACTIVE_APP\"].coordinates.default.password.x" "$CONFIG_FILE")
+  PASS_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].password.y // .apps[\"$ACTIVE_APP\"].coordinates.default.password.y" "$CONFIG_FILE")
+  LOGIN_X=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].login.x // .apps[\"$ACTIVE_APP\"].coordinates.default.login.x" "$CONFIG_FILE")
+  LOGIN_Y=$(jq -r ".apps[\"$ACTIVE_APP\"].coordinates[\"$ACTIVE_DEVICE\"].login.y // .apps[\"$ACTIVE_APP\"].coordinates.default.login.y" "$CONFIG_FILE")
+
+  USERNAME=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].username" "$CONFIG_FILE")
+  PASSWORD=$(jq -r ".accounts[\"$ACTIVE_ACCOUNT\"].password" "$CONFIG_FILE")
+
+  if [ "$EMAIL_X" = "null" ] || [ "$EMAIL_Y" = "null" ] || [ "$PASS_X" = "null" ] || [ "$PASS_Y" = "null" ] || [ "$LOGIN_X" = "null" ] || [ "$LOGIN_Y" = "null" ]; then
+    echo "Error: Missing coordinates for app '$ACTIVE_APP' (device '$ACTIVE_DEVICE' or default)."
+    echo "Add them with: $0 add-coordinates \"$ACTIVE_APP\" [\"$ACTIVE_DEVICE\"]"
+    exit 1
+  fi
+
+  printf "%b\n" "Using device: ${C_CYAN}$ACTIVE_DEVICE${C_RESET} ${C_DIM}($UDID)${C_RESET}"
+  printf "%b\n" "Using app:    ${C_CYAN}$ACTIVE_APP${C_RESET}"
+  printf "%b\n" "Using account:${C_CYAN}$ACTIVE_ACCOUNT${C_RESET} ${C_DIM}($USERNAME)${C_RESET}"
+
+  # Verify the simulator is booted; do not attempt to boot automatically
+  DEVICE_STATE=$(axe list-simulators | grep "$UDID" | awk -F'|' '{print $3}' | xargs)
+  if [ "$DEVICE_STATE" != "Booted" ]; then
+    printf "%b\n" "${C_RED}Error:${C_RESET} Simulator $UDID is not booted (state: $DEVICE_STATE)."
+    printf "%b\n" "Please boot the simulator manually, then rerun."
+    exit 1
+  fi
+
+  if [ -n "$BUNDLE_ID" ]; then
+    printf "%b\n" "Launching app: ${C_CYAN}$BUNDLE_ID${C_RESET}"
+    LAUNCH_OUT=$(xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>/dev/null || true)
+  fi
+
+  # Force Portrait due to AXe rotation bug (https://github.com/cameroncooke/AXe/issues/5)
+  if [ -n "$ORIENTATION" ] && [ "$ORIENTATION" != "Portrait" ]; then
+    printf "%b\n" "${C_YELLOW}Warning:${C_RESET} Orientation '$ORIENTATION' will be ignored; forcing Portrait."
+  fi
+  if true; then
+    printf "%b\n" "Setting orientation: ${C_CYAN}Portrait${C_RESET}"
+    # Note: You may be prompted to grant Terminal automation permissions the first time
+    osascript <<OSA || true
+tell application "Simulator" to activate
+tell application "System Events"
+  tell process "Simulator"
+    try
+      click (first menu item whose name starts with "$ACTIVE_DEVICE") of menu "Window" of menu bar 1
+    end try
+    try
+      click menu item "Portrait" of menu "Orientation" of menu item "Orientation" of menu "Device" of menu bar 1
+    end try
+  end tell
+end tell
+OSA
+  fi
+
+  # Wait a bit for app UI to become responsive
+  if [ -n "$POST_LAUNCH_DELAY_MS" ] && [ "$POST_LAUNCH_DELAY_MS" != "0" ]; then
+    SLEEP_SEC=$(awk "BEGIN { printf \"%.3f\", $POST_LAUNCH_DELAY_MS/1000 }")
+    sleep "$SLEEP_SEC"
+  fi
+
+  axe tap -x $EMAIL_X -y $EMAIL_Y --udid "$UDID"
+  axe type "$USERNAME" --udid "$UDID"
+
+  axe tap -x $PASS_X -y $PASS_Y --udid "$UDID"
+  axe type "$PASSWORD" --udid "$UDID"
+
+  axe tap -x $LOGIN_X -y $LOGIN_Y --udid "$UDID"
+
+  printf "%b\n" "${C_GREEN}Login automation completed!${C_RESET}"
+}
+
+function add-device() {
+  ensure_dependencies_installed
+
+  printf "%b\n" "${C_BLUE}Fetching available simulators (booted only)...${C_RESET}"
+  SIMS=$(axe list-simulators | grep "| Booted |" | awk -F'|' '{print $1 " | " $2}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+  if [ -z "$SIMS" ]; then
+    echo "No booted simulators found! Please boot a simulator and rerun add-device."
+    exit 1
+  fi
+
+  printf "%b\n" "${C_BOLD}Select a booted simulator:${C_RESET}"
+  IFS=$'\n' read -rd '' -a SIM_ARRAY <<<"$SIMS"
+
+  select CHOICE in "${SIM_ARRAY[@]}"; do
+    if [ -n "$CHOICE" ]; then
+      UDID=$(echo "$CHOICE" | awk -F'|' '{print $1}' | xargs)
+      NAME=$(echo "$CHOICE" | awk -F'|' '{print $2}' | xargs)
+      printf "%b\n" "${C_GREEN}You picked:${C_RESET} $NAME ${C_DIM}($UDID)${C_RESET}"
+      break
+    else
+      echo "Invalid choice"
+    fi
+  done
+
+  jq ".devices[\"$NAME\"] = { \"udid\": \"$UDID\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  printf "%b\n" "${C_GREEN}Added device${C_RESET} $NAME"
+
+  # Offer to add per-app overrides now
+  APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+  if [ -n "$APPS" ]; then
+    printf "%b\n" "Add per-app overrides (coordinates/orientation) for this device now? ${C_DIM}(y/N)${C_RESET}"
+    read yn
+    case "$yn" in
+      y|Y|yes|YES)
+        IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+        # Append a Done option
+        APP_ARRAY+=("Done")
+        while true; do
+          printf "%b\n" "${C_BOLD}Select an app to configure for ${C_CYAN}$NAME${C_RESET} (or Done):${C_RESET}"
+          select CHOICE in "${APP_ARRAY[@]}"; do
+            if [ -z "$CHOICE" ]; then
+              echo "Invalid choice"
+              break
+            fi
+            if [ "$CHOICE" = "Done" ]; then
+              echo "Finished adding overrides."
+              break 2
+            fi
+            APP_NAME="$CHOICE"
+            printf "%b\n" "Selected app: ${C_CYAN}$APP_NAME${C_RESET}"
+            printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+            ORI2="Portrait"
+            prompt_xy "email" "field ($APP_NAME / $NAME)" "100 300"
+            EX2="$X_OUT"; EY2="$Y_OUT"
+            prompt_xy "password" "field ($APP_NAME / $NAME)" "200 400"
+            PX2="$X_OUT"; PY2="$Y_OUT"
+            prompt_xy "login" "button ($APP_NAME / $NAME)" "200 510"
+            LX2="$X_OUT"; LY2="$Y_OUT"
+            jq ".apps[\"$APP_NAME\"].coordinates[\"$NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP_NAME\"].orientation[\"$NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            printf "%b\n" "${C_GREEN}Added overrides${C_RESET} for $APP_NAME ${C_DIM}($NAME)${C_RESET}"
+            break
+          done
+        done
+        ;;
+      *) ;;
+    esac
+  fi
+}
+
+function add-account() {
+  init_colors
+  NAME_ARG=$1
+  printf "%b" "Enter username: "
+  read USER
+  printf "%b" "Enter password: "
+  read -s PASS
+  echo
+  NICKNAME="$NAME_ARG"
+  if [ -z "$NICKNAME" ]; then
+    printf "%b" "Enter nickname for this account ${C_DIM}[default: $USER]${C_RESET}: "
+    read NICKNAME
+    if [ -z "$NICKNAME" ]; then NICKNAME="$USER"; fi
+  fi
+
+  jq ".accounts[\"$NICKNAME\"] = {
+    \"username\": \"$USER\",
+    \"password\": \"$PASS\"
+  }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+  printf "%b\n" "${C_GREEN}Added account${C_RESET} $NICKNAME"
+}
+
+function add-app() {
+  ensure_dependencies_installed
+  APP=$1
+  if [ -z "$APP" ]; then
+    echo "Enter app name:"
+    read APP
+  fi
+  if jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP already exists."
+    exit 1
+  fi
+  echo "Enter bundle ID for $APP (e.g., com.example.App):"
+  read BUNDLE_ID
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
+  echo "Extra wait after launch (ms, Enter for 1000):"
+  read WAIT_MS
+  if [ -z "$WAIT_MS" ]; then WAIT_MS=1000; fi
+  prompt_xy "email" "field (default coordinates)" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
+  jq ".apps[\"$APP\"] = { \"bundleId\": \"$BUNDLE_ID\", \"coordinates\": { \"default\": { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } } }, \"orientation\": { \"default\": \"$ORI\" }, \"timing\": { \"postLaunchDelayMs\": $WAIT_MS } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Added app $APP"
+
+  # Offer to add per-device overrides now
+  DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+  if [ -n "$DEVICES" ]; then
+    echo "Add per-device overrides (coordinates/orientation) now? (y/N)"
+    read yn
+    case "$yn" in
+      y|Y|yes|YES)
+        IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+        # Append a Done option
+        DEV_ARRAY+=("Done")
+        while true; do
+          echo "Select a device to configure (or Done):"
+          select CHOICE in "${DEV_ARRAY[@]}"; do
+            if [ -z "$CHOICE" ]; then
+              echo "Invalid choice"
+              break
+            fi
+            if [ "$CHOICE" = "Done" ]; then
+              echo "Finished adding overrides."
+              break 2
+            fi
+            DEVICE_NAME="$CHOICE"
+            echo "Selected: $DEVICE_NAME"
+            printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+            ORI2="Portrait"
+            prompt_xy "email" "field ($APP / $DEVICE_NAME)" "100 300"
+            EX2="$X_OUT"; EY2="$Y_OUT"
+            prompt_xy "password" "field ($APP / $DEVICE_NAME)" "200 400"
+            PX2="$X_OUT"; PY2="$Y_OUT"
+            prompt_xy "login" "button ($APP / $DEVICE_NAME)" "200 510"
+            LX2="$X_OUT"; LY2="$Y_OUT"
+            jq ".apps[\"$APP\"].coordinates[\"$DEVICE_NAME\"] = { \"email\": { \"x\": $EX2, \"y\": $EY2 }, \"password\": { \"x\": $PX2, \"y\": $PY2 }, \"login\": { \"x\": $LX2, \"y\": $LY2 } } | .apps[\"$APP\"].orientation[\"$DEVICE_NAME\"] = \"$ORI2\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            echo "Added overrides for $APP ($DEVICE_NAME)"
+            break
+          done
+        done
+        ;;
+      *) ;;
+    esac
+  fi
+}
+
+function set-orientation() {
+  ensure_dependencies_installed
+  APP=$1
+  DEVICE_NAME=$2
+  if [ -z "$APP" ]; then
+    echo "Usage: $0 set-orientation \"AppName\" [\"Device Name\"]"
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  KEY=${DEVICE_NAME:-default}
+  printf "%b\n" "${C_DIM}Note: Orientation is currently forced to Portrait due to AXe issue #5. Non-portrait selections will be ignored at runtime. https://github.com/cameroncooke/AXe/issues/5${C_RESET}"
+  ORI="Portrait"
+  jq ".apps[\"$APP\"].orientation[\"$KEY\"] = \"$ORI\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Set orientation for $APP ($KEY) to $ORI"
+}
+
+function add-coordinates() {
+  ensure_dependencies_installed
+  APP=$1
+  DEVICE_NAME=$2
+  if [ -z "$APP" ]; then
+    echo "Usage: $0 add-coordinates \"AppName\" [\"Device Name\"]"
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  KEY=${DEVICE_NAME:-default}
+  prompt_xy "email" "field ($APP / $KEY)" "100 300"
+  EX="$X_OUT"; EY="$Y_OUT"
+  prompt_xy "password" "field" "200 400"
+  PX="$X_OUT"; PY="$Y_OUT"
+  prompt_xy "login" "button" "200 510"
+  LX="$X_OUT"; LY="$Y_OUT"
+  jq ".apps[\"$APP\"].coordinates[\"$KEY\"] = { \"email\": { \"x\": $EX, \"y\": $EY }, \"password\": { \"x\": $PX, \"y\": $PY }, \"login\": { \"x\": $LX, \"y\": $LY } }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Updated coordinates for $APP ($KEY)"
+}
+
+function set-app-account() {
+  ensure_dependencies_installed
+  APP=$1
+  ACCOUNT=$2
+  if [ -z "$APP" ] || [ -z "$ACCOUNT" ]; then
+    echo "Usage: $0 set-app-account \"AppName\" \"AccountName\""
+    exit 1
+  fi
+  if ! jq -e ".apps[\"$APP\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "App $APP not found. Use 'add-app' first."
+    exit 1
+  fi
+  if ! jq -e ".accounts[\"$ACCOUNT\"]" "$CONFIG_FILE" > /dev/null; then
+    echo "Account $ACCOUNT not found. Use 'add-account' first."
+    exit 1
+  fi
+  jq ".apps[\"$APP\"].activeAccount = \"$ACCOUNT\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Set app $APP account override to $ACCOUNT"
+}
+
+function switch-app() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  if [ -z "$1" ]; then
+    APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+    if [ -z "$APPS" ]; then
+      echo "No apps found in config. Use 'add-app' first."
+      exit 1
+    fi
+    echo "Select a configured app to activate:"
+    IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+    select CHOICE in "${APP_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+  jq ".activeApp = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active app to $NAME"
+}
+
+function switch-device() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  if [ -z "$1" ]; then
+    DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+    if [ -z "$DEVICES" ]; then
+      echo "No devices found in config. Use 'add-device' first."
+      exit 1
+    fi
+    echo "Select a configured device to activate:"
+    IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+    select CHOICE in "${DEV_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+
+  # Ensure the selected device exists and get its UDID
+  UDID=$(jq -r ".devices[\"$NAME\"].udid // empty" "$CONFIG_FILE")
+  if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+    echo "Device '$NAME' not found in config."
+    exit 1
+  fi
+
+  # Attempt to boot (safe if already booted)
+  xcrun simctl boot "$UDID" >/dev/null 2>&1 || true
+  # Wait for boot completion if bootstatus is available; fallback to polling
+  if xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1; then
+    : # bootstatus handled the wait
+  else
+    # Fallback polling up to ~30s
+    for i in $(seq 1 30); do
+      STATE=$(xcrun simctl list devices | grep "$UDID" | sed -n 's/.*(\(Booted\|Shutdown\|Booting\|Shutting Down\)).*/\1/p' | tail -n1)
+      if [ "$STATE" = "Booted" ]; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+
+  jq ".activeDevice = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active device to $NAME (booted)"
+}
+
+function switch-all() {
+  ensure_dependencies_installed
+  init_colors
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  ACTIVE_APP=$(jq -r '.activeApp' "$CONFIG_FILE")
+  ACTIVE_ACCOUNT=$(jq -r '.activeAccount' "$CONFIG_FILE")
+
+  # Choose device
+  DEVICES=$(jq -r '.devices | keys[]?' "$CONFIG_FILE")
+  if [ -z "$DEVICES" ]; then
+    echo "No devices found in config. Use 'add-device' first."
+    exit 1
+  fi
+  echo "Select device (Enter for current: $ACTIVE_DEVICE):"
+  IFS=$'\n' read -rd '' -a DEV_ARRAY <<<"$DEVICES"
+  for i in "${!DEV_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${DEV_ARRAY[$i]}" = "$ACTIVE_DEVICE" ]; then
+      printf "  %s) %s %b[current]%b\n" "$idx" "${DEV_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
+    else
+      echo "  $idx) ${DEV_ARRAY[$i]}"
+    fi
+  done
+  printf "Select number (Enter for current): "
+  read DEV_SEL
+  if [ -z "$DEV_SEL" ]; then
+    CHOSEN_DEVICE="$ACTIVE_DEVICE"
+  else
+    if ! [[ "$DEV_SEL" =~ ^[0-9]+$ ]] || [ "$DEV_SEL" -lt 1 ] || [ "$DEV_SEL" -gt ${#DEV_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_DEVICE="${DEV_ARRAY[$((DEV_SEL-1))]}"
+  fi
+
+  # Choose app
+  APPS=$(jq -r '.apps | keys[]?' "$CONFIG_FILE")
+  if [ -z "$APPS" ]; then
+    echo "No apps found in config. Use 'add-app' first."
+    exit 1
+  fi
+  echo "Select app (Enter for current: $ACTIVE_APP):"
+  IFS=$'\n' read -rd '' -a APP_ARRAY <<<"$APPS"
+  for i in "${!APP_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${APP_ARRAY[$i]}" = "$ACTIVE_APP" ]; then
+      printf "  %s) %s %b[current]%b\n" "$idx" "${APP_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
+    else
+      echo "  $idx) ${APP_ARRAY[$i]}"
+    fi
+  done
+  printf "Select number (Enter for current): "
+  read APP_SEL
+  if [ -z "$APP_SEL" ]; then
+    CHOSEN_APP="$ACTIVE_APP"
+  else
+    if ! [[ "$APP_SEL" =~ ^[0-9]+$ ]] || [ "$APP_SEL" -lt 1 ] || [ "$APP_SEL" -gt ${#APP_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_APP="${APP_ARRAY[$((APP_SEL-1))]}"
+  fi
+
+  # Choose account
+  ACCOUNTS=$(jq -r '.accounts | keys[]?' "$CONFIG_FILE")
+  if [ -z "$ACCOUNTS" ]; then
+    echo "No accounts found in config. Use 'add-account' first."
+    exit 1
+  fi
+  echo "Select account (Enter for current: $ACTIVE_ACCOUNT):"
+  IFS=$'\n' read -rd '' -a ACC_ARRAY <<<"$ACCOUNTS"
+  for i in "${!ACC_ARRAY[@]}"; do
+    idx=$((i+1))
+    if [ "${ACC_ARRAY[$i]}" = "$ACTIVE_ACCOUNT" ]; then
+      printf "  %s) %s %b[current]%b\n" "$idx" "${ACC_ARRAY[$i]}" "${C_DIM}" "${C_RESET}"
+    else
+      echo "  $idx) ${ACC_ARRAY[$i]}"
+    fi
+  done
+  printf "Select number (Enter for current): "
+  read ACC_SEL
+  if [ -z "$ACC_SEL" ]; then
+    CHOSEN_ACCOUNT="$ACTIVE_ACCOUNT"
+  else
+    if ! [[ "$ACC_SEL" =~ ^[0-9]+$ ]] || [ "$ACC_SEL" -lt 1 ] || [ "$ACC_SEL" -gt ${#ACC_ARRAY[@]} ]; then
+      echo "Invalid selection"
+      exit 1
+    fi
+    CHOSEN_ACCOUNT="${ACC_ARRAY[$((ACC_SEL-1))]}"
+  fi
+
+  # Apply selections using existing commands (booting and foregrounding via switch-device)
+  "$0" switch-device "$CHOSEN_DEVICE" >/dev/null
+  "$0" switch-app "$CHOSEN_APP" >/dev/null
+  "$0" switch-account "$CHOSEN_ACCOUNT" >/dev/null
+
+  # Decorated summary
+  CHOSEN_UDID=$(jq -r ".devices[\"$CHOSEN_DEVICE\"].udid" "$CONFIG_FILE")
+  SEL_USERNAME=$(jq -r ".accounts[\"$CHOSEN_ACCOUNT\"].username" "$CONFIG_FILE")
+  printf "\n%b%s%b switched to:\n" "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
+  printf "  App:       %b%s%b\n" "${C_CYAN}${C_BOLD}" "$CHOSEN_APP" "${C_RESET}"
+  printf "  Simulator: %b%s%b %b(%s)%b\n" "${C_BLUE}${C_BOLD}" "$CHOSEN_DEVICE" "${C_RESET}" "${C_DIM}" "$CHOSEN_UDID" "${C_RESET}"
+  printf "  Account:   %b%s%b %b(%s)%b\n" "${C_YELLOW}${C_BOLD}" "$CHOSEN_ACCOUNT" "${C_RESET}" "${C_DIM}" "$SEL_USERNAME" "${C_RESET}"
+  printf "\nRun %b%s%b to log in." "${C_GREEN}${C_BOLD}" "slog" "${C_RESET}"
+}
+
+function add-interactive() {
+  ensure_dependencies_installed
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  echo "What would you like to add?"
+  select ITEM in "Device" "App" "Account" "Cancel"; do
+    case "$ITEM" in
+      Device)
+        "$0" add-device
+        break ;;
+      App)
+        "$0" add-app
+        break ;;
+      Account)
+        echo "Enter account name:"
+        read NAME
+        "$0" add-account "$NAME"
+        break ;;
+      Cancel)
+        echo "Cancelled."
+        break ;;
+      *) echo "Invalid choice" ;;
+    esac
+  done
+}
+
+function switch-account() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  if [ -z "$1" ]; then
+    ACCOUNTS=$(jq -r '.accounts | keys[]?' "$CONFIG_FILE")
+    if [ -z "$ACCOUNTS" ]; then
+      echo "No accounts found in config. Use 'add-account' first."
+      exit 1
+    fi
+    echo "Select a configured account to activate:"
+    IFS=$'\n' read -rd '' -a ACC_ARRAY <<<"$ACCOUNTS"
+    select CHOICE in "${ACC_ARRAY[@]}"; do
+      if [ -n "$CHOICE" ]; then
+        NAME="$CHOICE"
+        break
+      else
+        echo "Invalid choice"
+      fi
+    done
+  else
+    NAME="$1"
+  fi
+
+  jq ".activeAccount = \"$NAME\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  echo "Switched active account to $NAME"
+}
+
+function config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+  echo "Config file: $CONFIG_FILE"
+  if command -v jq >/dev/null 2>&1; then
+    jq . "$CONFIG_FILE"
+  else
+    cat "$CONFIG_FILE"
+  fi
+}
+
+function usage() {
+  cat <<EOF
+Usage: $0 [command]
+
+No arguments:
+  - If no config at $CONFIG_FILE: runs 'setup'
+  - If config exists: launches window aligner, then runs 'login'
+
+Commands:
+  setup                     Initialize config (v1.0.0), device, app, and account
+  login                     Automate login using active app/device/account
+  run SCRIPT                Run a previously recorded REPL script (~/.slog/scripts/SCRIPT.sh) using active device
+  add-device                Add a simulator device (UDID only)
+  add-app NAME              Add an app and set default coordinates
+  add account NAME          Add an account; prompts for credentials
+  add device                Shortcut for add-device
+  add app                   Shortcut for add-app (interactive)
+  add                       Interactive: pick what to add
+  add-coordinates APP [DEV] Add/override coordinates for app (default or device)
+  set-orientation APP [DEV] Set app orientation (default or per-device)
+  set-app-account APP ACC   Set per-app account override
+  switch-device NAME
+                    Set the active device
+  switch-app NAME
+                    Set the active app
+  switch-account NAME
+                    Set the active account
+  switch device [NAME]
+                    Switch active device (interactive if NAME omitted)
+  switch app [NAME]
+                    Switch active app (interactive if NAME omitted)
+  switch account [NAME]
+                    Switch active account (interactive if NAME omitted)
+  switch
+                     Interactive: pick device, app, account
+  config
+                     Print current configuration (JSON)
+  repl                      Interactive REPL for recording and replaying AXe scripts
+  run                       Show usage for run command
+
+Options:
+  -h, -H, --help    Show this help and exit
+EOF
+}
+
+function run-script() {
+  # Usage: run-script <script-name>
+  local SCRIPT_NAME="$1"
+  init_colors
+  if [ -z "$SCRIPT_NAME" ]; then
+    echo "Usage: $0 run <script-name>" >&2
+    echo "Scripts are stored in ~/.slog/scripts via 'slog repl' record command." >&2
+    return 1
+  fi
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first." >&2
+    return 1
+  fi
+  local ACTIVE_DEVICE UDID SCRIPTS_DIR SCRIPT_PATH SCRIPT_UDID FOUND_UDID
+  ACTIVE_DEVICE=$(jq -r '.activeDevice' "$CONFIG_FILE")
+  if [ -z "$ACTIVE_DEVICE" ] || [ "$ACTIVE_DEVICE" = "null" ]; then
+    echo "No activeDevice set in config." >&2
+    return 1
+  fi
+  UDID=$(jq -r ".devices[\"$ACTIVE_DEVICE\"].udid // empty" "$CONFIG_FILE")
+  if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+    echo "UDID for active device '$ACTIVE_DEVICE' not found in config." >&2
+    return 1
+  fi
+  SCRIPTS_DIR="$HOME/.slog/scripts"
+  SCRIPT_PATH="$SCRIPTS_DIR/${SCRIPT_NAME}.sh"
+  if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "Script '$SCRIPT_NAME' not found at $SCRIPT_PATH" >&2
+    echo "Use 'slog repl' then 'record <name>' to create it." >&2
+    return 1
+  fi
+  SCRIPT_UDID=""; FOUND_UDID=0
+  while IFS= read -r line; do
+    case "$line" in '#'*) continue ;; esac
+    set -- $line
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--udid" ]; then
+        shift
+        if [ -n "$1" ]; then SCRIPT_UDID="$1"; FOUND_UDID=1; fi
+        break
+      elif [[ "$1" == --udid=* ]]; then
+        SCRIPT_UDID="${1#--udid=}"; FOUND_UDID=1; break
+      fi
+      shift
+    done
+    [ $FOUND_UDID -eq 1 ] && break
+  done < "$SCRIPT_PATH"
+  if [ -n "$SCRIPT_UDID" ] && [ "$SCRIPT_UDID" != "$UDID" ]; then
+    echo -e "${C_YELLOW}Warning:${C_RESET} Script was recorded for UDID ${C_CYAN}$SCRIPT_UDID${C_RESET}, but your active device is ${C_CYAN}$UDID${C_RESET}." >&2
+    echo -e "${C_DIM}The script will run on its original device. To update, re-record or edit the script.${C_RESET}" >&2
+  fi
+  echo "Running script '$SCRIPT_NAME'" >&2
+  bash "$SCRIPT_PATH"
+  return $?
+}
+
+case "$1" in
+  "")
+    if [ ! -f "$CONFIG_FILE" ]; then
+      setup
+    else
+      launch_aligner
+      login
+    fi
+    ;;
+  -h|--help|-H)
+    usage
+    exit 0
+    ;;
+  setup) setup ;;
+  login) login ;;
+  add-device) add-device ;;
+  add-app) shift; add-app "$@" ;;
+  add-coordinates) shift; add-coordinates "$@" ;;
+  set-orientation) shift; set-orientation "$@" ;;
+  add-account) shift; add-account "$@" ;;
+  set-app-account) shift; set-app-account "$@" ;;
+  switch-device) shift; switch-device "$@" ;;
+  switch-app) shift; switch-app "$@" ;;
+  switch-account) shift; switch-account "$@" ;;
+  config) config ;;
+  run)
+    shift; run-script "$1"; exit $?
+    ;;
+  repl)
+    exec slog-repl.py
+    ;;
+  add)
+    shift
+    case "$1" in
+      "") add-interactive ;;
+      device) shift; add-device "$@" ;;
+      app) shift; add-app "$@" ;;
+      account) shift; add-account "$@" ;;
+      *)
+        echo "Usage: $0 add {device|app|account}"
+        echo "       $0 add       # interactive: pick what to add"
+        exit 1 ;;
+    esac
+    ;;
+  switch)
+    shift
+    case "$1" in
+      "" ) switch-all ;;
+      device)
+        shift; switch-device "$@" ;;
+      app)
+        shift; switch-app "$@" ;;
+      account)
+        shift; switch-account "$@" ;;
+      *)
+        echo "Usage: $0 switch {device|app|account} [NAME]"
+        echo "       $0 switch  # interactive: pick device, app, account"
+        exit 1 ;;
+    esac
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

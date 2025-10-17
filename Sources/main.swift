@@ -137,6 +137,7 @@ final class AlignmentController {
 	private var simulatorWindow: Window?
 	private var terminalWindow: Window?
 	private let margin: CGFloat
+	private var activationObserver: Any?
 
 
 	init(state: Swindler.State, margin: CGFloat) {
@@ -147,6 +148,7 @@ final class AlignmentController {
 	func start() {
 		refreshWindows(reason: "initial")
 		subscribeToState()
+		subscribeToAppActivation()
 	}
 
 	private func refreshWindows(reason: String) {
@@ -185,6 +187,23 @@ final class AlignmentController {
 			if event.window == sim {
 				Logger.debug("Simulator WindowFrameChangedEvent -> realign")
 				self.align(sim: sim, term: term)
+			}
+		}
+	}
+
+	private func subscribeToAppActivation() {
+		activationObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notif in
+			Logger.debug("NSWorkspace.didActivateApplicationNotification: \(notif)")
+			guard let self else { return }
+			guard let app = notif.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+			if app.bundleIdentifier == simulatorBundleId {
+				// Simulator activated; make sure we have current windows then raise terminal on top.
+				self.refreshWindows(reason: "simulator activated")
+				if let term = self.terminalWindow {
+					Logger.debug("Simulator activated; attempting to bring terminal frontmost")
+					// Bring the terminal app to front without stealing focus from fields (best-effort)
+					NSRunningApplication(processIdentifier: term.application.processIdentifier)?.activate(options: [.activateIgnoringOtherApps])
+				}
 			}
 		}
 	}

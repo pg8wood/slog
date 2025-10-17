@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cd "$ROOT_DIR"
+
+CONFIG="${1:-debug}"
+case "$CONFIG" in
+  debug|release) : ;;
+  *) echo "Usage: $0 [debug|release]" >&2; exit 1 ;;
+esac
+
+echo "Building aligner ($CONFIG)..." >&2
+swift build -c "$CONFIG"
+
+SRC="$ROOT_DIR/.build/$CONFIG/aligner"
+DST_DIR="$ROOT_DIR/bin"
+DST="$DST_DIR/slog-aligner"
+
+if [ ! -f "$SRC" ]; then
+  echo "Build succeeded but no aligner at $SRC" >&2
+  exit 1
+fi
+
+mkdir -p "$DST_DIR"
+cp -f "$SRC" "$DST"
+chmod +x "$DST"
+echo "Copied aligner to $DST" >&2
+
+
