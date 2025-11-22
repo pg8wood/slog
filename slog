@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 CONFIG_FILE="$HOME/.slog.json"
 SLOG_VERSION="1.0.0"
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 function init_colors() {
   if [ -n "$NO_COLOR" ] || [ ! -t 1 ]; then
@@ -814,6 +816,27 @@ function config() {
   fi
 }
 
+function learn() {
+  if [ -z "$OPENAI_API_KEY" ]; then
+    echo "Error: OPENAI_API_KEY environment variable is not set."
+    echo "Export it before running 'slog learn'."
+    exit 1
+  fi
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No config found. Run '$0 setup' first."
+    exit 1
+  fi
+
+  local LEARN_CLIENT="$SCRIPT_DIR/slog-learn.py"
+  if [ ! -f "$LEARN_CLIENT" ]; then
+    echo "Error: slog-learn.py was not found at $LEARN_CLIENT"
+    exit 1
+  fi
+
+  python3 "$LEARN_CLIENT" --config "$CONFIG_FILE"
+}
+
 function usage() {
   cat <<EOF
 Usage: $0 [command]
@@ -825,6 +848,7 @@ No arguments:
 Commands:
   setup                     Initialize config (v1.0.0), device, app, and account
   login                     Automate login using active app/device/account
+  learn                     Describe a flow and let slog build a script via AI
   run SCRIPT                Run a previously recorded REPL script (~/.slog/scripts/SCRIPT.sh) using active device
   add-device                Add a simulator device (UDID only)
   add-app NAME              Add an app and set default coordinates
@@ -929,6 +953,7 @@ case "$1" in
     ;;
   setup) setup ;;
   login) login ;;
+  learn) learn ;;
   add-device) add-device ;;
   add-app) shift; add-app "$@" ;;
   add-coordinates) shift; add-coordinates "$@" ;;

@@ -55,8 +55,19 @@ slog repl                          # open interactive REPL (record/list/run scri
 # Post-login scripts
 slog repl                          # run, record, and replay AXe commands in your simulator or arbitrary commands
 slog run <script>                  # run previously recorded script non-interactively
+
+# AI-assisted learning
+slog learn                         # describe a flow and let OpenAI record a script (needs OPENAI_API_KEY)
 ```
 
+
+---
+
+## 🤖 slog learn
+- Export `OPENAI_API_KEY` (and optionally `SLOG_OPENAI_MODEL`) before running `slog learn`.
+- Describe what you want automated; the AI can ask follow-up questions until it has enough detail.
+- The AI outputs a JSON plan with tap coordinates and generates a runnable script in `~/.slog/scripts/<name>.sh`.
+- Reuse the script any time with `slog run <name>` or edit it manually if you need tweaks.
 
 ---
 
